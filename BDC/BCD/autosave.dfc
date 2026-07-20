@@ -1,0 +1,364 @@
+{
+  "components": [
+    {
+      "instanceId": 2,
+      "position": {
+        "x": -328.0,
+        "y": -8.0
+      },
+      "properties": {
+        "customHeight": 0,
+        "customWidth": 0,
+        "initialValue": "1",
+        "label": "",
+        "notes": ""
+      },
+      "rotation": 0,
+      "typeId": "wiring.input"
+    },
+    {
+      "instanceId": 3,
+      "position": {
+        "x": -328.0,
+        "y": 16.0
+      },
+      "properties": {
+        "customHeight": 0,
+        "customWidth": 0,
+        "initialValue": "Z",
+        "label": "",
+        "notes": ""
+      },
+      "rotation": 0,
+      "typeId": "wiring.input"
+    },
+    {
+      "instanceId": 4,
+      "position": {
+        "x": -328.0,
+        "y": 40.0
+      },
+      "properties": {
+        "customHeight": 0,
+        "customWidth": 0,
+        "initialValue": "Z",
+        "label": "",
+        "notes": ""
+      },
+      "rotation": 0,
+      "typeId": "wiring.input"
+    },
+    {
+      "instanceId": 5,
+      "position": {
+        "x": -328.0,
+        "y": 64.0
+      },
+      "properties": {
+        "customHeight": 0,
+        "customWidth": 0,
+        "initialValue": "Z",
+        "label": "",
+        "notes": ""
+      },
+      "rotation": 0,
+      "typeId": "wiring.input"
+    },
+    {
+      "instanceId": 6,
+      "position": {
+        "x": -152.0,
+        "y": 0.0
+      },
+      "properties": {
+        "commonAnode": true,
+        "customHeight": 0,
+        "customWidth": 0,
+        "hasDecimalPoint": true,
+        "label": "",
+        "notes": ""
+      },
+      "rotation": 0,
+      "typeId": "io.seven_segment"
+    },
+    {
+      "instanceId": 7,
+      "position": {
+        "x": -256.0,
+        "y": -24.0
+      },
+      "properties": {
+        "bodyColor": "#2B2B2B",
+        "customHeight": 0,
+        "customWidth": 0,
+        "label": "",
+        "notes": "",
+        "propagationDelay": 1,
+        "variant": "7447"
+      },
+      "rotation": 0,
+      "typeId": "ic74ls.bcdDriver"
+    },
+    {
+      "instanceId": 8,
+      "position": {
+        "x": -248.0,
+        "y": 96.0
+      },
+      "properties": {
+        "color": "red",
+        "customHeight": 0,
+        "customWidth": 0,
+        "hasDecimalPoint": true,
+        "label": "",
+        "notes": ""
+      },
+      "rotation": 0,
+      "typeId": "io.hexDisplay"
+    },
+    {
+      "instanceId": 9,
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "properties": {
+        "bodyColor": "#EBEBEB",
+        "customHeight": 0,
+        "customWidth": 0,
+        "label": "",
+        "notes": ""
+      },
+      "rotation": 0,
+      "typeId": "debug.probe"
+    }
+  ],
+  "junctions": [],
+  "schemaVersion": 1,
+  "wires": [
+    {
+      "a": {
+        "componentId": 2,
+        "kind": "pin",
+        "pinIndex": 0
+      },
+      "b": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 0
+      },
+      "id": 0,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 3,
+        "kind": "pin",
+        "pinIndex": 0
+      },
+      "b": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 1
+      },
+      "id": 1,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 4,
+        "kind": "pin",
+        "pinIndex": 0
+      },
+      "b": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 2
+      },
+      "id": 2,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 5,
+        "kind": "pin",
+        "pinIndex": 0
+      },
+      "b": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 3
+      },
+      "id": 3,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 4
+      },
+      "b": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 0
+      },
+      "id": 4,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 5
+      },
+      "b": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 1
+      },
+      "id": 5,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 2
+      },
+      "b": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 6
+      },
+      "id": 6,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 3
+      },
+      "b": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 7
+      },
+      "id": 7,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 4
+      },
+      "b": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 8
+      },
+      "id": 8,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 5
+      },
+      "b": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 9
+      },
+      "id": 9,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 6
+      },
+      "b": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 10
+      },
+      "id": 10,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 8,
+        "kind": "pin",
+        "pinIndex": 0
+      },
+      "b": {
+        "componentId": 2,
+        "kind": "pin",
+        "pinIndex": 0
+      },
+      "id": 11,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 3,
+        "kind": "pin",
+        "pinIndex": 0
+      },
+      "b": {
+        "componentId": 8,
+        "kind": "pin",
+        "pinIndex": 1
+      },
+      "id": 12,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 4,
+        "kind": "pin",
+        "pinIndex": 0
+      },
+      "b": {
+        "componentId": 8,
+        "kind": "pin",
+        "pinIndex": 2
+      },
+      "id": 13,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 5,
+        "kind": "pin",
+        "pinIndex": 0
+      },
+      "b": {
+        "componentId": 8,
+        "kind": "pin",
+        "pinIndex": 3
+      },
+      "id": 14,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 2,
+        "kind": "pin",
+        "pinIndex": 0
+      },
+      "b": {
+        "componentId": 9,
+        "kind": "pin",
+        "pinIndex": 0
+      },
+      "id": 15,
+      "waypoints": []
+    }
+  ]
+}

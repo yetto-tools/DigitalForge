@@ -1,0 +1,175 @@
+#pragma once
+
+#include <QGraphicsScene>
+#include <QUndoStack>
+
+#include <map>
+#include <memory>
+#include <set>
+#include <vector>
+
+#include "CircuitDocument.hpp"
+
+class QKeyEvent;
+class QGraphicsSceneContextMenuEvent;
+
+namespace digitalforge::editor {
+
+class ComponentItem;
+class WireItem;
+class JunctionItem;
+class PinItem;
+class SelectionTool;
+class WireTool;
+class PlacementTool;
+
+enum class EditorMode { Selection, Wiring, Placement };
+
+// Es propietaria de los elementos graficos y reacciona a las senales de
+// CircuitDocument para mantenerlos sincronizados; nunca calcula por si misma
+// la logica de simulacion. Distribuye los eventos de raton a la herramienta
+// que corresponda segun el EditorMode actual.
+class CircuitScene : public QGraphicsScene {
+    Q_OBJECT
+
+public:
+    CircuitScene(CircuitDocument* document, QUndoStack* undoStack, QObject* parent = nullptr);
+    // Declarado (no default) aqui y definido en el .cpp: el destructor
+    // generado implicitamente necesitaria que SelectionTool/WireTool/
+    // PlacementTool fueran tipos completos en este punto (para destruir los
+    // miembros unique_ptr), pero en este header solo estan declarados por
+    // adelantado (forward-declared).
+    ~CircuitScene() override;
+
+    [[nodiscard]] CircuitDocument* document() const noexcept { return document_; }
+    [[nodiscard]] QUndoStack* undoStack() const noexcept { return undoStack_; }
+
+    void setMode(EditorMode mode);
+    [[nodiscard]] EditorMode mode() const noexcept { return mode_; }
+    void beginPlacement(const std::string& typeId);
+
+    [[nodiscard]] ComponentItem* componentItem(uint32_t componentId) const;
+    [[nodiscard]] JunctionItem* junctionItem(uint32_t junctionId) const;
+    [[nodiscard]] PinItem* pinItemAt(QPointF scenePos) const;
+    [[nodiscard]] JunctionItem* junctionItemAt(QPointF scenePos) const;
+    // Cable bajo scenePos, si lo hay -- usado por WireTool para detectar una
+    // "derivacion pendiente" al presionar/soltar sobre el cuerpo de un cable
+    // ya trazado (en vez de sobre un pin o un punto de union existente).
+    [[nodiscard]] WireItem* wireItemAt(QPointF scenePos) const;
+    // Bounding rect (en coordenadas de escena) de cada ComponentItem del
+    // documento salvo los que aparezcan en `excludeIds` -- usado por
+    // WireItem::updateGeometry() (ver appendElbow() en WireItem.cpp) para
+    // esquivarlos al auto-rutear en vez de dibujar el trazado encima. Nunca
+    // incluye WireItem/JunctionItem (esos no cuentan como obstaculo).
+    [[nodiscard]] std::vector<QRectF> componentObstacleRects(const std::set<uint32_t>& excludeIds) const;
+    void selectComponent(uint32_t componentId);
+
+    [[nodiscard]] bool snapToGridEnabled() const noexcept { return snapToGrid_; }
+    void setSnapToGridEnabled(bool enabled) { snapToGrid_ = enabled; }
+    [[nodiscard]] bool gridVisible() const noexcept { return showGrid_; }
+    void setGridVisible(bool visible) {
+        showGrid_ = visible;
+        update();
+    }
+
+    void drawBackground(QPainter* painter, const QRectF& rect) override;
+
+    // Expuesto para el menu Edit de MainWindow (acciones Delete / Rotate),
+    // que debe poder disparar el mismo comportamiento que la tecla Delete / 'R'.
+    void deleteSelected();
+    void rotateSelected();
+
+    // Orden de apilado (ComponentPlacement::zOrder) de los ComponentItem
+    // seleccionados, estilo draw.io - expuestos para el menu contextual de
+    // MainWindow (ver onComponentContextMenuRequested()). Con varios
+    // seleccionados, se preserva el orden relativo entre ellos: "al frente"/
+    // "al fondo" los reordena como grupo por encima/debajo de todo lo demas
+    // (no los apila todos al mismo z), "adelante"/"atras" simplemente
+    // adelanta/atrasa cada uno un paso de forma independiente.
+    void bringSelectedToFront();
+    void sendSelectedToBack();
+    void bringSelectedForward();
+    void sendSelectedBackward();
+
+    // Copiar/cortar/pegar de los ComponentItem seleccionados (y de los
+    // cables entre dos componentes que esten ambos copiados -- un cable
+    // hacia un componente o un punto de union que quedo afuera de la
+    // seleccion no se copia). El portapapeles se comparte entre todas las
+    // CircuitScene (ver CircuitScene.cpp), asi que copiar en un documento y
+    // pegar en otro del mismo proyecto funciona igual que en cualquier otro
+    // editor con portapapeles.
+    void copySelected();
+    void cutSelected();
+    void pasteClipboard();
+
+signals:
+    // Emitida al hacer clic derecho sobre un ComponentItem (en cualquier
+    // modo/estado). MainWindow la usa para ofrecer "Propiedades" en un menu
+    // contextual - la via explicita para ver/editar propiedades mientras la
+    // simulacion esta en ejecucion, ya que en ese estado la seleccion normal
+    // ya no actualiza el inspector automaticamente (ver
+    // MainWindow::onSceneSelectionChanged).
+    void componentContextMenuRequested(uint32_t componentId, QPoint screenPos);
+
+protected:
+    void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
+    void mouseMoveEvent(QGraphicsSceneMouseEvent* event) override;
+    void mouseReleaseEvent(QGraphicsSceneMouseEvent* event) override;
+    void mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
+    void contextMenuEvent(QGraphicsSceneContextMenuEvent* event) override;
+
+private slots:
+    void onComponentAdded(uint32_t componentId);
+    void onComponentAboutToBeRemoved(uint32_t componentId);
+    void onWireAdded(uint32_t wireId);
+    void onWireAboutToBeRemoved(uint32_t wireId);
+    void onWireGeometryChanged(uint32_t wireId);
+    void onJunctionAdded(uint32_t junctionId);
+    void onJunctionAboutToBeRemoved(uint32_t junctionId);
+    void onJunctionPositionChanged(uint32_t junctionId);
+    void onPropertyChanged(uint32_t componentId);
+    void onComponentPlacementChanged(uint32_t componentId);
+    void onSimulationChanged();
+
+private:
+    void applyPlacement(ComponentItem* item, const ComponentPlacement& placement);
+    // Mueve los ComponentItem seleccionados `delta` (en coordenadas de
+    // escena, sin pasar por el snap-a-grilla de un arrastre con el mouse -
+    // ver ComponentItem::itemChange) - usado por keyPressEvent() para las
+    // flechas del teclado, pensadas para el ajuste fino que el arrastre no
+    // permite.
+    void moveSelectedBy(QPointF delta);
+    // Si hay un wiring.input en scenePos, alterna su valor 0/1 y devuelve
+    // true. Usado tanto por el doble clic (modo edicion) como por el clic
+    // simple mientras la simulacion esta en ejecucion.
+    bool tryToggleInput(QPointF scenePos);
+
+    CircuitDocument* document_;
+    QUndoStack* undoStack_;
+    EditorMode mode_ = EditorMode::Selection;
+    bool snapToGrid_ = true;
+    bool showGrid_ = true;
+    // En modo Selection, pulsar sobre un pin inicia directamente un arrastre
+    // de cable (no se necesita un paso separado para "entrar en modo
+    // wiring") - es true mientras ese arrastre esta en curso, de modo que
+    // mouseMove/mouseRelease sigan enrutando a wireTool_ en lugar de al
+    // comportamiento de seleccion por defecto.
+    bool draggingWireFromSelection_ = false;
+    // Posicion (en coordenadas de escena) del ultimo press en modo Selection
+    // que no inicio un cable; mouseReleaseEvent la compara contra la posicion
+    // de release para distinguir un clic simple de un arrastre, de modo que
+    // alternar un wiring.input con un solo clic (mientras la simulacion esta
+    // en ejecucion) no interfiera con mover el componente.
+    QPointF pressScenePos_;
+
+    std::map<uint32_t, ComponentItem*> componentItems_;
+    std::map<uint32_t, WireItem*> wireItems_;
+    std::map<uint32_t, JunctionItem*> junctionItems_;
+
+    std::unique_ptr<SelectionTool> selectionTool_;
+    std::unique_ptr<WireTool> wireTool_;
+    std::unique_ptr<PlacementTool> placementTool_;
+};
+
+} // namespace digitalforge::editor

@@ -1,0 +1,30 @@
+.claude/
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+compile_commands.json
+# Build directories
+build/
+out/
+build-gui/
+build-linux/
+# Temporary files
+*.tmp
+*.log
+# IDE-specific files (e.g., CLion)
+idea/
+cmake-build-*/
+# Dependency folders
+_deps/
+*.obj
+*.d
+
+# Executables
+*.exe
+*.out
+
+# Scratch/manual-testing artifacts (not part of the product)
+scratch_*
