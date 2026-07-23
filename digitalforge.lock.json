@@ -1,0 +1,31 @@
+{
+  "components": [
+    {
+      "definitionVersion": 1,
+      "publicInterfaceHash": "eb9270a59fc48b2ef852aad723a7caee0f4a8d3303dc80ea463c23add3ce7858",
+      "simulationHash": "b2dbd90499aa38c05838a1f594b13fd2407df0012fa295d61f7619b594c80980",
+      "typeId": "gates.and"
+    },
+    {
+      "definitionVersion": 1,
+      "publicInterfaceHash": "867f2adabd4a2ac5efa361cea33b0d2560a00998e576126eb4fb5617451e6c04",
+      "simulationHash": "541bb920cc86d8e575bc90ffcc6ef9e2f9ff6d5ab57a255097fe9ecda279a18e",
+      "typeId": "io.led"
+    },
+    {
+      "definitionVersion": 1,
+      "publicInterfaceHash": "fe2604c9715fddd6359f2be6b0c30fcfef3ac5fe9c630c7d88c240aea9b140ac",
+      "simulationHash": "0d52fa1322265a670db5902da5c09431cd459a5b8c282e06771a2e97f2ef7aab",
+      "typeId": "wiring.input"
+    }
+  ],
+  "digitalForgeVersion": "0.1.0",
+  "libraries": [
+    {
+      "contentHash": "eb3f08ca5939085f4dbb4a6f2dd94f4a2121d7c06e033cd0747d3efbe22e8b80",
+      "libraryId": "org.digitalforge.builtin",
+      "version": "0.1.0"
+    }
+  ],
+  "lockFormatVersion": 1
+}
