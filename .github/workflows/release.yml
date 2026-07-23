@@ -49,28 +49,55 @@ jobs:
       - name: Instalar Inno Setup
         run: choco install innosetup --no-progress -y
 
+      - name: Localizar el toolchain MinGW
+        id: mingw
+        shell: pwsh
+        run: |
+          # install-qt-action instala MinGW como una "tool" de Qt; la carpeta
+          # exacta varia (mingw1310_64, etc.) y su base no siempre es
+          # GITHUB_WORKSPACE\Qt, asi que en vez de asumir la ruta se busca
+          # g++.exe bajo la carpeta Tools de Qt (relativa a QT_ROOT_DIR, que
+          # el propio action exporta).
+          $toolsRoot = if ($env:QT_ROOT_DIR) { Join-Path $env:QT_ROOT_DIR "..\..\Tools" } `
+                       else { Join-Path $env:GITHUB_WORKSPACE "Qt\Tools" }
+          Write-Host "Buscando g++.exe bajo: $toolsRoot"
+          if (Test-Path $toolsRoot) {
+            Get-ChildItem -Path $toolsRoot -Directory | ForEach-Object { Write-Host "  subcarpeta: $($_.Name)" }
+          }
+          $gpp = Get-ChildItem -Path $toolsRoot -Recurse -Filter g++.exe -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+          if (-not $gpp) {
+            throw "No se encontro g++.exe bajo $toolsRoot (¿fallo la instalacion del toolchain MinGW?)"
+          }
+          $bin = Split-Path $gpp.FullName
+          Write-Host "MinGW bin: $bin"
+          "bin=$bin" >> $env:GITHUB_OUTPUT
+
       - name: Compilar DigitalForge.exe
         shell: pwsh
         run: |
-          $mingwBin = Join-Path $env:GITHUB_WORKSPACE "Qt\Tools\mingw1310_64\bin"
-          $env:PATH = "$mingwBin;$env:PATH"
+          $bin = "${{ steps.mingw.outputs.bin }}"
+          $env:PATH = "$bin;$env:PATH"
           cmake -S . -B build-gui -G "MinGW Makefiles" `
             -DCMAKE_BUILD_TYPE=Release -DDIGITALFORGE_BUILD_GUI=ON `
             -DDIGITALFORGE_BUILD_TESTS=OFF -DDIGITALFORGE_BUILD_BENCHMARK=OFF `
-            -DCMAKE_C_COMPILER="$mingwBin\gcc.exe" -DCMAKE_CXX_COMPILER="$mingwBin\g++.exe"
+            -DCMAKE_C_COMPILER="$bin\gcc.exe" -DCMAKE_CXX_COMPILER="$bin\g++.exe"
           cmake --build build-gui --target DigitalForge -j
 
       - name: Empaquetar (windeployqt + Inno Setup)
         shell: pwsh
         run: |
-          $mingwBin = Join-Path $env:GITHUB_WORKSPACE "Qt\Tools\mingw1310_64\bin"
+          $bin = "${{ steps.mingw.outputs.bin }}"
+          # windeployqt --compiler-runtime necesita el MinGW en el PATH para
+          # encontrar el runtime del compilador.
+          $env:PATH = "$bin;$env:PATH"
           $dist = "packaging\windows\dist\DigitalForge"
           New-Item -ItemType Directory -Path $dist -Force | Out-Null
           Copy-Item "build-gui\src\app\DigitalForge.exe" $dist
           windeployqt --release --compiler-runtime (Join-Path $dist "DigitalForge.exe")
           # Igual que build_installer.ps1: garantizar el runtime del MinGW que compilo.
           foreach ($dll in @("libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll")) {
-            Copy-Item (Join-Path $mingwBin $dll) $dist -Force
+            Copy-Item (Join-Path $bin $dll) $dist -Force
           }
           # Componentes JSON (Fase 3): viajan junto al ejecutable.
           if (Test-Path "components") { Copy-Item "components" (Join-Path $dist "components") -Recurse -Force }
@@ -119,14 +146,24 @@ jobs:
 
       - name: Construir el AppImage con linuxdeploy
         run: |
+          # Los runners de GitHub no montan FUSE de forma fiable, asi que las
+          # herramientas .AppImage (linuxdeploy y su plugin qt) se ejecutan
+          # extrayendose en vez de montandose.
+          export APPIMAGE_EXTRACT_AND_RUN=1
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy*.AppImage
           export QMAKE="$(which qmake6 || which qmake)"
+          # linuxdeploy usa la variable OUTPUT para nombrar el AppImage final.
           export OUTPUT="DigitalForge-${{ steps.ver.outputs.tag }}-x86_64.AppImage"
-          ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage
-          # linuxdeploy nombra el archivo segun el .desktop; se renombra al esquema del release.
-          mv DigitalForge*.AppImage "$OUTPUT" 2>/dev/null || mv ./*.AppImage "$OUTPUT"
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/DigitalForge \
+            --desktop-file AppDir/usr/share/applications/io.github.yetto_tools.DigitalForge.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/io.github.yetto_tools.DigitalForge.png \
+            --plugin qt \
+            --output appimage
+          ls -la *.AppImage
 
       - name: Subir AppImage como artefacto
         uses: actions/upload-artifact@v4
