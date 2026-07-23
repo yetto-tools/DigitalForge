@@ -5,6 +5,7 @@
 #include "app/AppSettings.hpp"
 
 class QCheckBox;
+class QLineEdit;
 class QSpinBox;
 
 namespace digitalforge::ui {
@@ -31,10 +32,14 @@ signals:
 
 private:
     void resetToDefaults();
+    // Abre el selector de carpeta para la ruta de trabajo, partiendo de la que
+    // este escrita en el campo.
+    void browseForWorkspace();
 
     QSpinBox* autosaveIntervalSpin_;
     QCheckBox* defaultGridCheck_;
     QCheckBox* defaultSnapCheck_;
+    QLineEdit* workspaceEdit_;
 };
 
 } // namespace digitalforge::ui
