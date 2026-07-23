@@ -4,10 +4,14 @@
 // CATCH_CONFIG_RUNNER definido en test_project_serializer.cpp (ver
 // tests_qt/CMakeLists.txt).
 
+#include <QDir>
 #include <QPointF>
+#include <QTemporaryDir>
 #include <QUndoStack>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdlib>
+#include <fstream>
 #include <utility>
 #include <vector>
 
@@ -234,4 +238,42 @@ TEST_CASE("setProperty() rebuilds the simulation for properties marked affectsSi
 
     doc.setProperty(in0, "initialValue", PropertyValue{std::string("1")});
     CHECK(doc.pinValue(in0, 0) == LogicValue::One);
+}
+
+TEST_CASE("CircuitDocument loads JSON components from DIGITALFORGE_COMPONENTS_DIR",
+          "[circuitdocument][json]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
+    {
+        std::ofstream file(QDir(tempDir.path()).filePath(QStringLiteral("nand3.json")).toStdString());
+        file << R"({
+            "typeId": "custom.nand3",
+            "displayName": "NAND-3",
+            "category": "Gates",
+            "pins": [
+                {"name": "A", "dir": "in"}, {"name": "B", "dir": "in"},
+                {"name": "C", "dir": "in"}, {"name": "Y", "dir": "out"}
+            ],
+            "netlist": [{"gate": "Nand", "in": ["A", "B", "C"], "out": "Y"}]
+        })";
+    }
+    qputenv("DIGITALFORGE_COMPONENTS_DIR", tempDir.path().toUtf8());
+
+    CircuitDocument doc;
+    CHECK(doc.registry().contains("custom.nand3"));
+    CHECK(doc.componentLibraryReport().errors.empty());
+    CHECK(doc.componentLibraryReport().loadedTypeIds.size() == 1);
+
+    // Es colocable y simula: NAND(1,1,1) = 0.
+    const uint32_t a = doc.addComponent("wiring.input", {{"initialValue", std::string("1")}});
+    const uint32_t b = doc.addComponent("wiring.input", {{"initialValue", std::string("1")}});
+    const uint32_t c = doc.addComponent("wiring.input", {{"initialValue", std::string("1")}});
+    const uint32_t nand3 = doc.addComponent("custom.nand3");
+    doc.addWire(PinRef{a, 0}, PinRef{nand3, 0});
+    doc.addWire(PinRef{b, 0}, PinRef{nand3, 1});
+    doc.addWire(PinRef{c, 0}, PinRef{nand3, 2});
+    doc.runUntilStable();
+    CHECK(doc.pinValue(nand3, 3) == LogicValue::Zero);
+
+    qunsetenv("DIGITALFORGE_COMPONENTS_DIR");
 }
