@@ -18,6 +18,10 @@ void PlacementTool::setPendingType(std::string typeId) { pendingTypeId_ = std::m
 
 void PlacementTool::press(QGraphicsSceneMouseEvent* event) {
     if (pendingTypeId_.empty()) {
+        // Sin tipo armado no hay nada que colocar, pero quedarse en modo
+        // Placement dejaba la escena atascada: ningun clic posterior podia
+        // seleccionar ni arrastrar nada.
+        scene_->setMode(EditorMode::Selection);
         return;
     }
     if (!document_->requireEditable(QStringLiteral("colocar un componente"))) {
@@ -32,10 +36,13 @@ void PlacementTool::press(QGraphicsSceneMouseEvent* event) {
 
     auto* command = new PlaceComponentCommand(document_, pendingTypeId_, {}, placement);
     undoStack_->push(command);
-    scene_->selectComponent(command->componentId());
 
+    // Volver a modo Selection ANTES de seleccionar: setMode() hace
+    // clearSelection(), asi que en el orden inverso el componente recien
+    // colocado terminaba deseleccionado.
     pendingTypeId_.clear();
     scene_->setMode(EditorMode::Selection);
+    scene_->selectComponent(command->componentId());
 }
 
 } // namespace digitalforge::editor
