@@ -130,6 +130,23 @@ QColor labelInkColor() {
     return dark ? QColor(220, 220, 220) : QColor(40, 40, 40);
 }
 
+// Nombre corto en ingles que se dibuja en el centro del cuerpo de una puerta
+// logica (ver paintGate). Cadena vacia para tipos que no son una puerta con
+// forma AND/OR/NOT.
+QString gateCenterLabel(const std::string& typeId) {
+    if (typeId == "gates.and") return QStringLiteral("AND");
+    if (typeId == "gates.nand") return QStringLiteral("NAND");
+    if (typeId == "gates.or") return QStringLiteral("OR");
+    if (typeId == "gates.nor") return QStringLiteral("NOR");
+    if (typeId == "gates.xor") return QStringLiteral("XOR");
+    if (typeId == "gates.xnor") return QStringLiteral("XNOR");
+    if (typeId == "gates.not") return QStringLiteral("NOT");
+    if (typeId == "gates.buffer") return QStringLiteral("BUF");
+    if (typeId == "gates.tristateBuffer") return QStringLiteral("BUF");
+    if (typeId == "gates.tristateInverter") return QStringLiteral("NOT");
+    return QString();
+}
+
 // Simbolo tipo BJT (wiring.transistor/transmissionGate): el/los control(es)
 // entran derecho desde el borde izquierdo hasta una barra corta; cada
 // terminal del canal (Source/Drain o A/Y, agrupados del lado derecho por
@@ -157,35 +174,6 @@ QPointF paintMosLeg(QPainter* painter, qreal barX, qreal barY, qreal width, qrea
     painter->drawLine(QPointF(barX, barY), kink);
     painter->drawLine(kink, QPointF(width, termY));
     return kink;
-}
-
-// Punta de flecha sobre la diagonal `from`->`to`, a mitad de camino - misma
-// convencion NPN/PNP (apunta hacia afuera de la barra en NMOS, hacia
-// adentro en PMOS) que el simbolo real de un transistor.
-void paintMosArrow(QPainter* painter, QPointF from, QPointF to, bool pointingOutward, const QColor& ink) {
-    QPointF dir = to - from;
-    const qreal len = std::hypot(dir.x(), dir.y());
-    if (len < 0.001) {
-        return;
-    }
-    dir /= len;
-    if (!pointingOutward) {
-        dir = -dir;
-    }
-    const QPointF mid = from + (to - from) * 0.5;
-    constexpr qreal arrowHalfLen = 3.0;
-    constexpr qreal arrowHalfWidth = 2.5;
-    const QPointF tip = mid + dir * arrowHalfLen;
-    const QPointF back = mid - dir * arrowHalfLen;
-    const QPointF normal(-dir.y(), dir.x());
-    QPainterPath path;
-    path.moveTo(tip);
-    path.lineTo(back + normal * arrowHalfWidth);
-    path.lineTo(back - normal * arrowHalfWidth);
-    path.closeSubpath();
-    painter->setBrush(ink);
-    painter->setPen(Qt::NoPen);
-    painter->drawPath(path);
 }
 
 // Un segmento de un display de 7 segmentos real es una barra hexagonal
@@ -239,6 +227,152 @@ QPainterPath buildPortShapePath(QRectF rect, bool pointsRight) {
     }
     path.closeSubpath();
     return path;
+}
+
+// Intervalo horizontal [izquierda, derecha] realmente disponible DENTRO de
+// `shape` para una banda de alto `bandHeight` centrada en `centerY`. Las
+// compuertas no son rectangulos -el escudo Or termina en punta a la derecha y
+// el triangulo Not se cierra sobre su vertice-, asi que centrar un texto en el
+// bodyRect lo deja sobresaliendo del contorno (defecto reportado: NOT/NAND se
+// salian por la izquierda, OR/XNOR por la punta derecha). Se muestrean tres
+// filas de la banda y se toma la interseccion, de modo que cualquier texto
+// centrado en el intervalo devuelto quepa entero dentro de la forma.
+std::pair<qreal, qreal> shapeSpanForBand(const QPainterPath& shape, QRectF bounds, qreal centerY,
+                                         qreal bandHeight) {
+    // Bisecta entre un punto interior y uno exterior de la misma fila. Valido
+    // porque la interseccion de estas formas con una horizontal es siempre un
+    // unico intervalo.
+    const auto findEdge = [&shape](qreal inside, qreal outside, qreal y) {
+        for (int i = 0; i < 12; ++i) {
+            const qreal mid = (inside + outside) / 2.0;
+            if (shape.contains(QPointF(mid, y))) {
+                inside = mid;
+            } else {
+                outside = mid;
+            }
+        }
+        return inside;
+    };
+
+    qreal left = bounds.left();
+    qreal right = bounds.right();
+    bool measured = false;
+    for (int row = 0; row < 3; ++row) {
+        const qreal y = centerY + bandHeight * (row / 2.0 - 0.5);
+        qreal inside = bounds.center().x();
+        if (!shape.contains(QPointF(inside, y))) {
+            // La fila puede no contener el centro del bodyRect (p. ej. cerca
+            // del vertice del triangulo): se barre en busca de algun punto
+            // interior y, si la fila queda entera fuera, se descarta.
+            constexpr int kProbes = 16;
+            bool found = false;
+            for (int i = 0; i <= kProbes && !found; ++i) {
+                const qreal x = bounds.left() + bounds.width() * i / kProbes;
+                if (shape.contains(QPointF(x, y))) {
+                    inside = x;
+                    found = true;
+                }
+            }
+            if (!found) {
+                continue;
+            }
+        }
+        const qreal rowLeft = findEdge(inside, bounds.left() - 1.0, y);
+        const qreal rowRight = findEdge(inside, bounds.right() + 1.0, y);
+        left = measured ? std::max(left, rowLeft) : rowLeft;
+        right = measured ? std::min(right, rowRight) : rowRight;
+        measured = true;
+    }
+    return measured ? std::pair<qreal, qreal>{left, right}
+                    : std::pair<qreal, qreal>{bounds.left(), bounds.right()};
+}
+
+// UNICO punto de ajuste del tamano del texto central de las compuertas: la
+// altura de la fuente como fraccion del alto del cuerpo. Subirlo agranda el
+// texto de toda la libreria, bajarlo lo achica.
+inline constexpr qreal kGateLabelHeightFactor = 0.15;
+
+// Cuanto puede el ajuste automatico apartarse de ese nominal cuando la palabra
+// mas larga no entra en la forma mas angosta: como mucho baja al 80%. Sin este
+// limite el recorte llevaba SIEMPRE la fuente al mismo minimo, y mover
+// kGateLabelHeightFactor no cambiaba nada en pantalla.
+inline constexpr qreal kGateLabelMinShrink = 0.80;
+
+// Salvaguarda absoluta para componentes diminutos; no deberia entrar en juego
+// con los tamanos normales.
+inline constexpr qreal kGateLabelMinPointSize = 2.5;
+
+// Tamano de fuente COMUN a todas las compuertas de un mismo tamano de
+// componente. Se calcula sobre los casos mas restrictivos de la libreria -las
+// etiquetas de 4 letras (NAND en el cuerpo And, XNOR en el escudo Or con la
+// curva extra) y NOT en el triangulo, que es la forma que menos ancho deja a
+// la altura del texto- y se aplica por igual al resto. Asi la proporcion del
+// texto no cambia de una compuerta a otra: antes cada una crecia hasta llenar
+// su propio cuerpo y los tipos negados (que pierden ancho por la burbuja y
+// ademas tienen nombres mas largos) quedaban con letras mucho mas chicas.
+// El resultado se cachea porque solo depende del tamano del componente, del
+// diametro de la burbuja y de la fuente base, y calcularlo implica muestrear
+// varios QPainterPath.
+qreal gateLabelPointSize(const QFont& baseFont, qreal width, qreal height, qreal bubbleDiameter,
+                         qreal sideMargin) {
+    struct WorstCase {
+        GateShapeKind kind;
+        bool hasExtraCurve;
+        const char* label;
+    };
+    static constexpr std::array<WorstCase, 3> kWorstCases{{
+        {GateShapeKind::And, false, "NAND"},
+        {GateShapeKind::Or, true, "XNOR"},
+        {GateShapeKind::Not, false, "NOT"},
+    }};
+
+    static qreal cachedWidth = -1.0;
+    static qreal cachedHeight = -1.0;
+    static qreal cachedBubble = -1.0;
+    static QString cachedFontKey;
+    static qreal cachedPointSize = kGateLabelMinPointSize;
+
+    const QString fontKey = baseFont.toString();
+    if (qFuzzyCompare(width, cachedWidth) && qFuzzyCompare(height, cachedHeight) &&
+        qFuzzyCompare(bubbleDiameter, cachedBubble) && fontKey == cachedFontKey) {
+        return cachedPointSize;
+    }
+
+    // Nominal pedido por kGateLabelHeightFactor, y hasta donde puede bajarlo el
+    // ajuste automatico. Cada caso solo puede reducir, nunca agrandar, asi que
+    // el valor final es el que satisface al mas exigente de todos.
+    const qreal nominalPointSize = std::max(kGateLabelMinPointSize, (height - 12.0) * kGateLabelHeightFactor);
+    const qreal floorPointSize = std::max(kGateLabelMinPointSize, nominalPointSize * kGateLabelMinShrink);
+    qreal pointSize = nominalPointSize;
+    for (const WorstCase& worst : kWorstCases) {
+        const qreal leftMargin = worst.hasExtraCurve ? 6.0 : 3.0;
+        const QRectF body(leftMargin, 6.0, width - leftMargin - (3.0 + bubbleDiameter), height - 12.0);
+        if (body.width() <= 0.0 || body.height() <= 0.0) {
+            continue;
+        }
+        const QPainterPath shape = buildGateShapePath(worst.kind, body);
+        const QString label = QString::fromLatin1(worst.label);
+        QFont font = baseFont;
+        font.setBold(true);
+        for (int pass = 0; pass < 2; ++pass) {
+            font.setPointSizeF(pointSize);
+            const QFontMetricsF fm(font);
+            const auto span = shapeSpanForBand(shape, body, body.center().y(), fm.capHeight());
+            const qreal available = span.second - span.first - sideMargin;
+            const qreal advance = fm.horizontalAdvance(label);
+            if (advance <= 0.0 || available <= 0.0 || advance <= available) {
+                break;
+            }
+            pointSize = std::max(floorPointSize, pointSize * available / advance);
+        }
+    }
+
+    cachedWidth = width;
+    cachedHeight = height;
+    cachedBubble = bubbleDiameter;
+    cachedFontKey = fontKey;
+    cachedPointSize = pointSize;
+    return pointSize;
 }
 
 // Estado visual de un segmento/punto de un display de 7 segmentos,
@@ -297,7 +431,7 @@ void drawSevenSegmentDigit(QPainter* painter, QRectF digitRect, const std::array
     // propiedad "color" en io.hexDisplay - io.seven_segment no tiene esa
     // propiedad y siempre usa el default) / gris apagado, como un display
     // LED real; rojo se reserva para un conflicto/ambiguedad real.
-    const QColor kSegmentOff(90, 90, 90);
+    const QColor kSegmentOff(65, 65, 65);
     const QColor kSegmentConflict(220, 30, 30);
     const auto colorFor = [&](SegmentState state) {
         switch (state) {
@@ -366,13 +500,58 @@ void ComponentItem::rebuildPins() {
     // reportado). Retorna temprano: el resto de la funcion (leftPins/
     // rightPins, stubs) no aplica a este tipo.
     if (instance->typeId() == "io.ledMatrix") {
-        const auto rows = std::get<uint64_t>(instance->property("rows"));
-        const auto cols = std::get<uint64_t>(instance->property("cols"));
+        auto rows = std::get<uint64_t>(instance->property("rows"));
+        auto cols = std::get<uint64_t>(instance->property("cols"));
+        const bool multiplexed = components::ledMatrixIsMultiplexed(*instance);
+        if (!multiplexed) {
+            // Mismo recorte que aplica derivePins(): sin el, la grilla dibujada
+            // no coincidiria con la cantidad real de pines.
+            rows = std::min<uint64_t>(rows, components::kLedMatrixMaxDirectSide);
+            cols = std::min<uint64_t>(cols, components::kLedMatrixMaxDirectSide);
+        }
         constexpr qreal pitch = 16.0;
         constexpr qreal margin = 6.0;
         constexpr qreal cellRadius = pitch * 0.32;
         width_ = std::max<qreal>(32.0, static_cast<qreal>(cols) * pitch);
         height_ = std::max<qreal>(32.0, static_cast<qreal>(rows) * pitch + margin * 2.0);
+
+        if (multiplexed) {
+            // Los pines dejan de ser las celdas: un pin por fila sobre el
+            // borde izquierdo y uno por columna sobre el inferior, con la
+            // grilla de LEDs dibujada por paintLedMatrix(). Se reserva un
+            // margen para los stubs de columna abajo.
+            constexpr qreal kColStubBand = 10.0;
+            const auto customWidthMux = std::get<uint64_t>(instance->property("customWidth"));
+            if (customWidthMux > 0) {
+                width_ = static_cast<qreal>(customWidthMux);
+            }
+            const auto customHeightMux = std::get<uint64_t>(instance->property("customHeight"));
+            if (customHeightMux > 0) {
+                height_ = static_cast<qreal>(customHeightMux);
+            } else {
+                height_ += kColStubBand;
+            }
+
+            pinStubLength_ = 0.0;
+            const qreal gridHeight = height_ - margin - kColStubBand;
+            const qreal pitchXMux = width_ / static_cast<qreal>(cols);
+            const qreal pitchYMux = (gridHeight - margin) / static_cast<qreal>(rows);
+            pinLocalPositions_.assign(pins.size(), QPointF{});
+            for (uint64_t row = 0; row < rows; ++row) {
+                pinLocalPositions_[static_cast<std::size_t>(row)] =
+                    QPointF(0.0, margin + pitchYMux * (static_cast<qreal>(row) + 0.5));
+            }
+            for (uint64_t col = 0; col < cols; ++col) {
+                pinLocalPositions_[static_cast<std::size_t>(rows + col)] =
+                    QPointF(pitchXMux * (static_cast<qreal>(col) + 0.5), height_);
+            }
+            for (uint16_t i = 0; i < static_cast<uint16_t>(pins.size()); ++i) {
+                auto* pin = new PinItem(document_, componentId_, i, pins[i].direction, this);
+                pin->setPos(pinLocalPositions_[i]);
+                pinItems_.push_back(pin);
+            }
+            return;
+        }
 
         const auto customWidth = std::get<uint64_t>(instance->property("customWidth"));
         if (customWidth > 0) {
@@ -761,15 +940,20 @@ void ComponentItem::paintGate(QPainter* painter, bool selected) {
     // pensados para un width_ de 64 - con width_=32 (mas cuadrado, menos
     // alargado) los valores viejos dejaban un bodyRect casi inexistente en
     // el peor caso (XNOR: burbuja + curva extra).
-    constexpr qreal bubbleDiameter = 4.0;
+    // La burbuja de negacion se agranda (era 4.0) y se dibuja con contorno
+    // grueso y relleno claro fijo, para que la negacion de salida se lea de un
+    // vistazo y no se confunda con el pin gris de salida (defecto reportado:
+    // NAND/NOR/XNOR/NOT casi indistinguibles de sus versiones sin negar).
+    constexpr qreal bubbleDiameter = 7.0;
     const qreal rightMargin = 3.0 + (hasBubble ? bubbleDiameter : 0.0);
     const qreal leftMargin = hasExtraCurve ? 6.0 : 3.0;
     const QRectF bodyRect(leftMargin, 6.0, width_ - leftMargin - rightMargin, height_ - 12.0);
     const QColor fillColor = bodyFillColor(*instance, QColor(235, 235, 235));
 
+    const QPainterPath shapePath = buildGateShapePath(kind, bodyRect);
     painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(20, 20, 20), selected ? 2.0 : 1.5));
     painter->setBrush(fillColor);
-    painter->drawPath(buildGateShapePath(kind, bodyRect));
+    painter->drawPath(shapePath);
 
     if (hasExtraCurve) {
         painter->setBrush(Qt::NoBrush);
@@ -781,8 +965,11 @@ void ComponentItem::paintGate(QPainter* painter, bool selected) {
     qreal stubStartX = bodyRightEdge;
     if (hasBubble) {
         const QPointF bubbleCenter(bodyRightEdge + bubbleDiameter / 2.0 + 1.0, outputY);
-        painter->setPen(QPen(QColor(20, 20, 20), 1.5));
-        painter->setBrush(fillColor);
+        // Contorno grueso + relleno claro fijo (no el color del cuerpo) para
+        // que la burbuja de negacion contraste y se distinga tanto del cuerpo
+        // como del pin de salida.
+        painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(15, 15, 15), 2.0));
+        painter->setBrush(QColor(245, 245, 245));
         painter->drawEllipse(bubbleCenter, bubbleDiameter / 2.0, bubbleDiameter / 2.0);
         stubStartX = bubbleCenter.x() + bubbleDiameter / 2.0;
     }
@@ -794,6 +981,46 @@ void ComponentItem::paintGate(QPainter* painter, bool selected) {
             const qreal y = pinLocalPositions_[i].y();
             painter->drawLine(QPointF(0.0, y), QPointF(bodyRect.left(), y));
         }
+    }
+
+    // Nombre corto en ingles centrado en el cuerpo. El centro y el tamano NO
+    // se derivan de factores por forma (eso hacia que el texto se saliera del
+    // contorno en NOT/NAND/OR/XNOR): se mide con shapeSpanForBand() el hueco
+    // horizontal que la propia forma deja a la altura del texto, se centra ahi
+    // y se achica la fuente hasta que la palabra entre. El dibujado sigue
+    // siendo rect + Qt::AlignCenter, igual que el glifo de Entrada/Salida.
+    const QString label = gateCenterLabel(typeId);
+    if (!label.isEmpty()) {
+        // Margen para no pegar el texto al contorno (que tiene 1.5-2.0 px de
+        // grosor y se dibuja centrado sobre el borde).
+        constexpr qreal sideMargin = 4.0;
+
+        // Un unico tamano para toda la libreria de compuertas (ver
+        // gateLabelPointSize): la etiqueta ya viene calculada para entrar en
+        // el caso mas exigente, asi que aqui no se recorta nada mas. Sin
+        // condensar: comprimir el ancho hacia que las letras se vieran
+        // estiradas a lo alto, fuera de proporcion.
+        QFont font = painter->font();
+        font.setBold(true);
+        font.setPointSizeF(gateLabelPointSize(painter->font(), width_, height_, bubbleDiameter, sideMargin));
+
+        // El centro si es propio de cada forma: se mide el hueco horizontal
+        // que el contorno deja a la altura del texto y se centra ahi.
+        const QFontMetricsF spanMetrics(font);
+        const auto span = shapeSpanForBand(shapePath, bodyRect, bodyRect.center().y(), spanMetrics.capHeight());
+        const qreal centerX = (span.first + span.second) / 2.0;
+
+        // Qt::AlignCenter centra la caja de linea completa (ascent+descent);
+        // como solo hay mayusculas, el bloque de tinta real queda alto. Se
+        // corrige bajando el rect hasta que el centro de las mayusculas caiga
+        // exactamente en centerY.
+        const QFontMetricsF fm(font);
+        const qreal inkOffsetY = (fm.descent() - fm.ascent() + fm.capHeight()) / 2.0;
+        const QRectF textRect = bodyRect.translated(centerX - bodyRect.center().x(), inkOffsetY);
+
+        painter->setFont(font);
+        painter->setPen(selected ? QColor(30, 90, 220) : QColor(70, 70, 70));
+        painter->drawText(textRect, Qt::AlignCenter, label);
     }
 }
 
@@ -890,14 +1117,16 @@ void ComponentItem::paintPowerOnReset(QPainter* painter, bool selected) {
 
 void ComponentItem::paintOutput(QPainter* painter, bool selected) {
     // Mismo tratamiento visual que paintInput (color/glifo segun el valor
-    // observado), pero con la punta del contorno apuntando hacia la
-    // izquierda (el pin de Salida es de entrada, en el lado izquierdo).
+    // observado), con el mismo contorno apuntando hacia la derecha - el lado
+    // recto/plano queda a la izquierda, que es donde se conecta el cable
+    // (pedido explicito: la punta es puramente decorativa, no debe coincidir
+    // con el lado del pin).
     const core::LogicValue value = document_->pinValue(componentId_, 0);
     const QRectF bodyRect(4.0, 6.0, width_ - 7.0, height_ - 12.0);
 
     painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(20, 20, 20), selected ? 2.0 : 1.5));
     painter->setBrush(logicValueColor(value));
-    painter->drawPath(buildPortShapePath(bodyRect, false));
+    painter->drawPath(buildPortShapePath(bodyRect, true));
     painter->drawLine(QPointF(PinItem::kRadius, height_ / 2.0), QPointF(bodyRect.left(), height_ / 2.0));
 
     QFont font = painter->font();
@@ -905,7 +1134,7 @@ void ComponentItem::paintOutput(QPainter* painter, bool selected) {
     font.setPointSizeF(12.0);
     painter->setFont(font);
     painter->setPen(value == core::LogicValue::Zero || value == core::LogicValue::Error ? Qt::white : Qt::black);
-    const QRectF textRect = bodyRect.translated(bodyRect.height() * 0.095, -bodyRect.height() * 0.045);
+    const QRectF textRect = bodyRect.translated(-bodyRect.height() * 0.095, -bodyRect.height() * 0.045);
     painter->drawText(textRect, Qt::AlignCenter, logicValueGlyph(value));
 }
 
@@ -1007,31 +1236,42 @@ void ComponentItem::paintGround(QPainter* painter, bool selected) {
 }
 
 void ComponentItem::paintTransistor(QPainter* painter, bool selected) {
-    // Simbolo tipo BJT (ver el comentario de paintMosLeg()): Gate (pin 1,
-    // el unico pin izquierdo tras el override de rebuildPins() - siempre
-    // cae exactamente centrado) entra derecho hasta la barra; Source(pin
-    // 0)/Drain(pin 2) salen de ella por su propia pata en angulo hacia el
-    // borde derecho. La flecha sobre la pata de Source sigue la misma
-    // convencion NPN/PNP de un transistor real: apunta hacia afuera en
-    // NMOS (conduce con Gate=1, como NPN), hacia adentro en PMOS (conduce
-    // con Gate=0, como PNP) - ver wiring.transistor::buildSimulation().
+    // Simbolo MOSFET de manual (circulo + compuerta aislada + canal), en vez
+    // del BJT con flecha de polaridad que tenia antes - pedido explicito de
+    // volver al simbolo "por defecto". La compuerta (pin 1, izquierda) nunca
+    // toca la barra de canal (representa el aislante); Source(pin 0)/Drain
+    // (pin 2) salen del canal por su propia pata en angulo, reutilizando
+    // paintMosLeg() sin cambios. La distincion NMOS/PMOS que antes daba la
+    // flecha ahora es la burbuja sobre la compuerta (misma convencion que ya
+    // usa el control P de wiring.transmissionGate).
     const components::ComponentInstance* instance = document_->component(componentId_);
     const bool isPmos = std::get<std::string>(instance->property("type")) == "PMOS";
     const QColor ink = selected ? QColor(30, 90, 220) : labelInkColor();
-    const qreal barX = width_ * 0.4;
     const qreal gateY = pinLocalPositions_[1].y();
     const qreal sourceY = pinLocalPositions_[0].y();
     const qreal drainY = pinLocalPositions_[2].y();
-    const qreal sourceBarY = gateY - kMosDiagonalSplit;
-    const qreal drainBarY = gateY + kMosDiagonalSplit;
+
+    const qreal circleR = std::min({width_ * 0.36, height_ * 0.42, 16.0});
+    const qreal circleCenterX = width_ - circleR - 4.0;
+    const qreal gateBarX = circleCenterX - circleR * 0.35;
+    const qreal channelBarX = circleCenterX + circleR * 0.05;
+    const qreal gateBarHalf = circleR * 0.55;
+    const qreal channelBarHalf = circleR * 0.45;
+    const qreal sourceBarY = gateY - channelBarHalf;
+    const qreal drainBarY = gateY + channelBarHalf;
 
     painter->setPen(QPen(ink, 1.4));
-    painter->drawLine(QPointF(barX, gateY - kMosBarHalfHeight), QPointF(barX, gateY + kMosBarHalfHeight));
-    painter->drawLine(QPointF(0.0, gateY), QPointF(barX, gateY));
-    const QPointF sourceKink = paintMosLeg(painter, barX, sourceBarY, width_, sourceY, ink);
-    paintMosLeg(painter, barX, drainBarY, width_, drainY, ink);
+    painter->setBrush(Qt::NoBrush);
+    painter->drawEllipse(QPointF(circleCenterX, gateY), circleR, circleR);
+    painter->drawLine(QPointF(0.0, gateY), QPointF(gateBarX, gateY));
+    painter->drawLine(QPointF(gateBarX, gateY - gateBarHalf), QPointF(gateBarX, gateY + gateBarHalf));
+    if (isPmos) {
+        painter->setBrush(Qt::NoBrush);
+        painter->drawEllipse(QPointF(gateBarX - 3.0, gateY), 2.2, 2.2);
+    }
 
-    paintMosArrow(painter, QPointF(barX, sourceBarY), sourceKink, !isPmos, ink);
+    paintMosLeg(painter, channelBarX, sourceBarY, width_, sourceY, ink);
+    paintMosLeg(painter, channelBarX, drainBarY, width_, drainY, ink);
 }
 
 void ComponentItem::paintTransmissionGate(QPainter* painter, bool selected) {
@@ -1527,13 +1767,119 @@ void ComponentItem::paintIc74ls(QPainter* painter, bool selected) {
 }
 
 void ComponentItem::paintLedMatrix(QPainter* painter, bool selected) {
-    // Solo el fondo: cada celda la dibuja su propio PinItem (posicionado
-    // exactamente sobre la grilla en rebuildPins(), coloreado con el mismo
-    // criterio rojo encendido/gris apagado en PinItem::paint()) - el pin ES
-    // la celda, asi que no hay nada mas que dibujar aca sin duplicar.
+    const components::ComponentInstance* instance = document_->component(componentId_);
+
     painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(20, 20, 20), selected ? 2.0 : 1.2));
     painter->setBrush(QColor(40, 40, 40));
     painter->drawRoundedRect(QRectF(0.0, 0.0, width_, height_), 6.0, 6.0);
+
+    if (!components::ledMatrixIsMultiplexed(*instance)) {
+        // Conexion directa: cada celda la dibuja su propio PinItem
+        // (posicionado sobre la grilla en rebuildPins(), coloreado con el
+        // criterio encendido/apagado de PinItem::paint()) - el pin ES la
+        // celda, asi que no hay nada mas que dibujar aca sin duplicar.
+        return;
+    }
+
+    // Multiplexada: los pines viven en los bordes, asi que las celdas se
+    // dibujan aca. Una celda esta encendida cuando su fila alimenta y su
+    // columna drena (ledMatrixMultiplexedCellIsLit).
+    const auto rows = static_cast<std::size_t>(std::get<uint64_t>(instance->property("rows")));
+    const auto cols = static_cast<std::size_t>(std::get<uint64_t>(instance->property("cols")));
+    if (rows == 0 || cols == 0) {
+        return;
+    }
+
+    std::vector<core::LogicValue> rowValues(rows);
+    for (std::size_t r = 0; r < rows; ++r) {
+        rowValues[r] = document_->pinValue(componentId_, static_cast<uint16_t>(r));
+    }
+    std::vector<core::LogicValue> colValues(cols);
+    for (std::size_t c = 0; c < cols; ++c) {
+        colValues[c] = document_->pinValue(componentId_, static_cast<uint16_t>(rows + c));
+    }
+
+    updateMatrixPersistence(rows, cols, rowValues, colValues, *instance);
+
+    const QColor baseColor = ledBaseColor(std::get<std::string>(instance->property("color")));
+    const QColor offColor = baseColor.darker(420);
+    constexpr qreal margin = 6.0;
+    constexpr qreal colStubBand = 10.0;
+    const qreal gridHeight = height_ - margin - colStubBand;
+    const qreal pitchX = width_ / static_cast<qreal>(cols);
+    const qreal pitchY = (gridHeight - margin) / static_cast<qreal>(rows);
+    const qreal radius = std::min(pitchX, pitchY) * 0.32;
+
+    painter->setPen(Qt::NoPen);
+    for (std::size_t r = 0; r < rows; ++r) {
+        for (std::size_t c = 0; c < cols; ++c) {
+            const QPointF center(pitchX * (static_cast<qreal>(c) + 0.5),
+                                  margin + pitchY * (static_cast<qreal>(r) + 0.5));
+            const qreal brightness = matrixPersistence_[r * cols + c];
+            QColor cellColor = offColor;
+            if (brightness > 0.0) {
+                // Mezcla lineal entre apagado y encendido: el barrido deja
+                // celdas a media luz mientras se apagan (ver
+                // updateMatrixPersistence). El cast es explicito porque
+                // QColor::fromRgbF toma float y la interpolacion se hace en
+                // el qreal (double) del brillo.
+                const auto mixChannel = [brightness](float off, float on) {
+                    return static_cast<float>(off + (on - off) * brightness);
+                };
+                cellColor = QColor::fromRgbF(mixChannel(offColor.redF(), baseColor.redF()),
+                                              mixChannel(offColor.greenF(), baseColor.greenF()),
+                                              mixChannel(offColor.blueF(), baseColor.blueF()));
+            }
+            painter->setBrush(cellColor);
+            painter->drawEllipse(center, radius, radius);
+        }
+    }
+
+    // Stubs de los pines de columna, que quedan por debajo de la grilla.
+    painter->setPen(QPen(QColor(20, 20, 20), 1.2));
+    for (std::size_t c = 0; c < cols; ++c) {
+        const qreal x = pitchX * (static_cast<qreal>(c) + 0.5);
+        painter->drawLine(QPointF(x, gridHeight), QPointF(x, height_));
+    }
+}
+
+void ComponentItem::updateMatrixPersistence(std::size_t rows, std::size_t cols,
+                                             const std::vector<core::LogicValue>& rowValues,
+                                             const std::vector<core::LogicValue>& colValues,
+                                             const components::ComponentInstance& instance) {
+    // Un panel multiplexado real enciende una sola fila por vez y es la
+    // persistencia de la vista la que compone la imagen completa. Sin imitar
+    // eso, el lienzo mostraria una unica fila encendida y el resto apagado, y
+    // no se veria nunca la figura que el circuito esta barriendo.
+    if (matrixPersistence_.size() != rows * cols) {
+        matrixPersistence_.assign(rows * cols, 0.0);
+        matrixPersistenceClock_.start();
+        matrixPersistenceLastMs_ = 0;
+    }
+    if (!matrixPersistenceClock_.isValid()) {
+        matrixPersistenceClock_.start();
+        matrixPersistenceLastMs_ = 0;
+    }
+
+    const qint64 nowMs = matrixPersistenceClock_.elapsed();
+    const qreal elapsed = static_cast<qreal>(nowMs - matrixPersistenceLastMs_);
+    matrixPersistenceLastMs_ = nowMs;
+
+    // Decaimiento lineal: a los kPersistenceMs de su ultimo encendido la celda
+    // queda del todo apagada.
+    constexpr qreal kPersistenceMs = 180.0;
+    const qreal decay = elapsed <= 0.0 ? 0.0 : elapsed / kPersistenceMs;
+
+    for (std::size_t r = 0; r < rows; ++r) {
+        for (std::size_t c = 0; c < cols; ++c) {
+            qreal& brightness = matrixPersistence_[r * cols + c];
+            if (components::ledMatrixMultiplexedCellIsLit(instance, rowValues[r], colValues[c])) {
+                brightness = 1.0;
+            } else {
+                brightness = std::max(0.0, brightness - decay);
+            }
+        }
+    }
 }
 
 void ComponentItem::paintTerminal(QPainter* painter, bool selected) {
