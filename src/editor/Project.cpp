@@ -12,6 +12,8 @@
 
 #include "CircuitDocument.hpp"
 #include "components/BasicComponentLibrary.hpp"
+#include "core/Version.hpp"
+#include "formats/LockFile.hpp"
 #include "formats/LogisimImporter.hpp"
 #include "formats/ProjectManifestSerializer.hpp"
 #include "formats/ProjectSerializer.hpp"
@@ -396,6 +398,18 @@ void Project::saveToFile(const QString& path) {
             throw std::runtime_error("Project::saveToFile: fallo la escritura de '" + path.toStdString() + "'");
         }
         projectName_ = manifest.projectName;
+    }
+
+    // Archivo de bloqueo junto al .dfproj: registra la version EXACTA de cada
+    // componente usado (definitionVersion + huellas) con las que se guardo, de
+    // modo que reabrir el proyecto pueda detectar si el entorno cambio. Se
+    // escribe en cada guardado, siempre, para que quede sincronizado con el
+    // contenido. Un fallo aca no debe invalidar un guardado ya exitoso.
+    try {
+        formats::writeLockFile(*this, core::kDigitalForgeVersion, projectDir.absolutePath().toStdString());
+    } catch (const std::exception&) {
+        // El proyecto ya se guardo; el lock es informativo y se regenera al
+        // proximo guardado.
     }
 
     projectFilePath_ = path;
