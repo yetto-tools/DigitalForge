@@ -34,6 +34,7 @@ endif()
 
 add_library(digitalforge_core STATIC
     src/core/Simulator.cpp
+    src/core/Sha256.cpp
 )
 target_include_directories(digitalforge_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -46,6 +47,7 @@ add_library(digitalforge_components STATIC
     src/components/ComponentInstance.cpp
     src/components/ComponentRegistry.cpp
     src/components/BasicComponentLibrary.cpp
+    src/components/ComponentFingerprints.cpp
 )
 target_link_libraries(digitalforge_components PUBLIC digitalforge_core nlohmann_json::nlohmann_json)
 
