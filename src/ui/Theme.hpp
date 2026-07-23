@@ -16,9 +16,10 @@ enum class ThemeMode {
 //
 // Qt 6.7 todavia no permite forzar el esquema de color (QStyleHints::
 // setColorScheme llega en 6.8), asi que los modos Claro/Oscuro se consiguen
-// cambiando al estilo Fusion con una paleta propia; el modo Sistema restaura
-// el estilo y la paleta nativos, que en Windows ya siguen la configuracion de
-// color del sistema.
+// cambiando al estilo Fusion con una paleta propia; el modo Sistema vuelve al
+// estilo nativo pero arma su propia paleta segun QStyleHints::colorScheme()
+// (style()->standardPalette() no distingue claro/oscuro, y una vez fijada
+// una paleta propia Qt no la vuelve a sincronizar solo con el SO).
 //
 // Todo lo que hoy se reconstruye al recibir QStyleHints::colorSchemeChanged
 // (iconos procedurales, colores del lienzo) debe conectarse ademas a
