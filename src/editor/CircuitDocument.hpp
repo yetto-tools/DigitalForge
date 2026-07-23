@@ -173,6 +173,15 @@ public:
     // existente; geometria pura, nunca dispara una reconstruccion.
     void setWireWaypoints(uint32_t wireId, std::vector<QPointF> waypoints);
 
+    // Reconecta uno de los dos extremos de un cable existente a un nuevo
+    // destino (pin o punto de union), sin borrar el otro extremo. Reconstruye
+    // el WireItem correspondiente (via wireAboutToBeRemoved + wireAdded, para
+    // que la vista tome la nueva ancla) y limpia el punto de union viejo si
+    // quedo huerfano. Devuelve false (sin cambios) si el destino no existe o
+    // dejaria el cable conectado a si mismo. `endIsA` elige cual extremo se
+    // reconecta.
+    bool retargetWire(uint32_t wireId, bool endIsA, WireEndpoint newEndpoint);
+
     [[nodiscard]] const WireConnection* wire(uint32_t wireId) const;
     [[nodiscard]] std::vector<uint32_t> wireIds() const;
     [[nodiscard]] std::vector<WireConnection> wiresAttachedToComponent(uint32_t componentId) const;
@@ -185,6 +194,10 @@ public:
     // undo puedan reproducir el mismo id en cada redo().
     [[nodiscard]] uint32_t reserveJunctionId() noexcept { return nextJunctionId_++; }
     void addJunctionWithId(uint32_t junctionId, QPointF position);
+    // Elimina un punto de union libre. No-op si no existe o si todavia tiene
+    // cables conectados (para no dejar extremos colgando); pensado para el
+    // undo de AddJunctionCommand, donde el cable que lo acompanaba ya se quito.
+    void removeJunction(uint32_t junctionId);
     [[nodiscard]] QPointF junctionPosition(uint32_t junctionId) const;
     // Reubica un punto de union ya existente (JunctionItem ahora es
     // arrastrable - ver su comentario de clase). Geometria pura, igual que
@@ -278,6 +291,22 @@ public:
     // structural.subcircuit ya colocado con el resolver nuevo.
     void setSiblingResolver(std::function<const CircuitDocument*(const QString&)> resolver);
 
+    // Uniones extra derivadas de la GEOMETRIA (no de un WireConnection
+    // explicito): pares de extremos que deben quedar en la misma net porque
+    // coinciden en la misma celda de grilla o porque uno cae sobre el cuerpo
+    // de un cable del otro (derivacion en T). Las calcula la capa de vista
+    // (CircuitScene), que es la unica que conoce las coordenadas de escena de
+    // los pines; el modelo las incorpora al union-find en rebuildSimulation().
+    // Provider nulo (tests headless, subcircuitos) = sin uniones geometricas.
+    using GeometricConnectionProvider = std::function<std::vector<std::pair<WireEndpoint, WireEndpoint>>()>;
+    void setGeometricConnectionProvider(GeometricConnectionProvider provider);
+    // Fuerza un recalculo de la conectividad (vuelve a correr el union-find,
+    // incluidas las uniones geometricas del provider). Lo llama la vista tras
+    // mover un componente/union, ya que un movimiento puede hacer que dos
+    // puntos de conexion pasen a tocarse -- algo que antes no cambiaba la
+    // simulacion.
+    void recomputeConnectivity();
+
 signals:
     void componentAdded(uint32_t componentId);
     void componentAboutToBeRemoved(uint32_t componentId);
@@ -357,6 +386,7 @@ private:
     bool liveSimulation_ = false;
     bool positiveLogicPolarity_ = true;
     std::function<const CircuitDocument*(const QString&)> siblingResolver_;
+    GeometricConnectionProvider geometricConnectionProvider_;
     // Uno por cada wiring.clock presente - ver rebuildClockTimers(). Cada
     // QTimer esta parentado a `this` (destruido junto con el documento);
     // se recrean por completo en cada rebuildSimulation() en vez de
