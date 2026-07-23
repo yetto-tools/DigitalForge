@@ -8,15 +8,20 @@
 #include <QUndoStack>
 #include <catch2/catch_test_macros.hpp>
 
+#include <utility>
+#include <vector>
+
 #include "editor/CircuitDocument.hpp"
 #include "editor/UndoCommands.hpp"
 
 using digitalforge::core::LogicValue;
 using digitalforge::components::PropertyValue;
+using digitalforge::editor::AddJunctionCommand;
 using digitalforge::editor::AddWireCommand;
 using digitalforge::editor::CircuitDocument;
 using digitalforge::editor::MoveJunctionCommand;
 using digitalforge::editor::PinRef;
+using digitalforge::editor::RetargetWireEndpointCommand;
 using digitalforge::editor::SetZOrderCommand;
 using digitalforge::editor::SplitWireCommand;
 using digitalforge::editor::WireEndpoint;
@@ -51,6 +56,78 @@ TEST_CASE("A junction survives at degree 1 and is removed at degree 0", "[circui
 
     doc.removeWire(wire1);
     CHECK(doc.junctionIds().empty()); // grado 0: se elimino en cascada
+}
+
+TEST_CASE("retargetWire moves one endpoint to another pin, and is undoable", "[circuitdocument][retarget]") {
+    CircuitDocument doc;
+    const uint32_t in0 = doc.addComponent("wiring.input", {{"initialValue", PropertyValue{std::string("1")}}});
+    const uint32_t ledA = doc.addComponent("io.led");
+    const uint32_t ledB = doc.addComponent("io.led");
+
+    const uint32_t wireId = doc.addWire(PinRef{in0, 0}, PinRef{ledA, 0});
+    REQUIRE(doc.pinValue(ledA, 0) == LogicValue::One);
+
+    QUndoStack undoStack;
+    undoStack.push(new RetargetWireEndpointCommand(&doc, wireId, /*endIsA=*/false, WireEndpoint(PinRef{ledB, 0})));
+
+    // La energia se movio de ledA a ledB; ledA queda sin manejar (ya no One).
+    CHECK(doc.pinValue(ledB, 0) == LogicValue::One);
+    CHECK(doc.pinValue(ledA, 0) != LogicValue::One);
+
+    undoStack.undo();
+    CHECK(doc.pinValue(ledA, 0) == LogicValue::One);
+    CHECK(doc.pinValue(ledB, 0) != LogicValue::One);
+}
+
+TEST_CASE("retargetWire refuses a destination that would connect the wire to itself",
+          "[circuitdocument][retarget]") {
+    CircuitDocument doc;
+    const uint32_t in0 = doc.addComponent("wiring.input");
+    const uint32_t led = doc.addComponent("io.led");
+    const uint32_t wireId = doc.addWire(PinRef{in0, 0}, PinRef{led, 0});
+
+    // Reconectar el extremo B al mismo pin que el extremo A dejaria a==b.
+    CHECK_FALSE(doc.retargetWire(wireId, /*endIsA=*/false, WireEndpoint(PinRef{in0, 0})));
+    // El cable no cambio.
+    const auto* w = doc.wire(wireId);
+    REQUIRE(w != nullptr);
+    CHECK(w->b == WireEndpoint(PinRef{led, 0}));
+}
+
+TEST_CASE("A geometric-connection hint merges two pins into one net without a drawn wire",
+          "[circuitdocument][geometric]") {
+    CircuitDocument doc;
+    const uint32_t in0 = doc.addComponent("wiring.input", {{"initialValue", PropertyValue{std::string("1")}}});
+    const uint32_t led = doc.addComponent("io.led");
+
+    // Sin cable ni hint: el led no recibe nada del input.
+    REQUIRE(doc.pinValue(led, 0) != LogicValue::One);
+
+    // Un hint geometrico (como el que produce la vista cuando dos pines caen
+    // en la misma celda) los une electricamente.
+    doc.setGeometricConnectionProvider([in0, led] {
+        return std::vector<std::pair<WireEndpoint, WireEndpoint>>{
+            {WireEndpoint(PinRef{in0, 0}), WireEndpoint(PinRef{led, 0})}};
+    });
+    CHECK(doc.pinValue(led, 0) == LogicValue::One);
+
+    // Quitar el provider los vuelve a separar.
+    doc.setGeometricConnectionProvider(nullptr);
+    CHECK(doc.pinValue(led, 0) != LogicValue::One);
+}
+
+TEST_CASE("AddJunctionCommand creates a free junction and undo removes it", "[circuitdocument][geometric]") {
+    CircuitDocument doc;
+    QUndoStack undoStack;
+    auto* command = new AddJunctionCommand(&doc, QPointF(16, 16));
+    undoStack.push(command);
+    REQUIRE(doc.junctionIds().size() == 1);
+
+    undoStack.undo();
+    CHECK(doc.junctionIds().empty()); // sin cables, se elimina al deshacer
+
+    undoStack.redo();
+    CHECK(doc.junctionIds().size() == 1);
 }
 
 TEST_CASE("setJunctionPosition relocates a junction and is undoable via MoveJunctionCommand",
