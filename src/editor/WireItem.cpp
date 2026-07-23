@@ -1,8 +1,11 @@
 #include "WireItem.hpp"
 
+#include <QGraphicsSceneHoverEvent>
 #include <QGraphicsSceneMouseEvent>
+#include <QGraphicsView>
 #include <QLineF>
 #include <QPainter>
+#include <QPainterPathStroker>
 #include <QStyleOptionGraphicsItem>
 #include <QTimer>
 #include <QUndoStack>
@@ -16,7 +19,9 @@
 #include "GridSnap.hpp"
 #include "JunctionItem.hpp"
 #include "LogicColors.hpp"
+#include "PinItem.hpp"
 #include "UndoCommands.hpp"
+#include "WireRouting.hpp"
 
 namespace digitalforge::editor {
 
@@ -38,89 +43,6 @@ constexpr qreal kInsertDragThreshold = 4.0;
 // de pixeles generaban un quiebre en angulo recto perfectamente correcto
 // mate pero visualmente leido como un error de trazado ("no se ve recto") --
 // el defecto reportado.
-constexpr qreal kAlignTolerance = 3.0;
-
-// El tramo vertical de un codo (ver appendElbow()) cruza `rect` si su x cae
-// dentro del ancho del rectangulo y su recorrido en y (entre `yMin`/`yMax`)
-// se superpone con la altura del rectangulo -- test estandar de
-// segmento-vertical contra rectangulo, usado por chooseClearMidX() para
-// saber si un candidato de x esta libre.
-bool verticalSegmentCrosses(qreal x, qreal yMin, qreal yMax, const QRectF& rect) {
-    return x >= rect.left() && x <= rect.right() && yMax >= rect.top() && yMin <= rect.bottom();
-}
-
-// Elige la x del tramo vertical del codo entre `from` y `to`: el punto medio
-// natural si ya esta libre de `obstacles` (el caso comun), o si no el
-// candidato libre mas cercano a ese punto medio, probando corrimientos
-// crecientes a ambos lados -- en vez de dejar que el codo pase derecho por
-// encima de otro componente que haya quedado en el medio (el defecto
-// reportado: cables que atraviesan visualmente otras compuertas en vez de
-// esquivarlas). Si ningun candidato dentro del rango de busqueda queda
-// libre (obstaculos muy densos), se resigna al punto medio natural -- un
-// cable que cruza una compuerta sigue siendo mejor que uno que serpentea
-// sin necesidad.
-qreal chooseClearMidX(QPointF from, QPointF to, const std::vector<QRectF>& obstacles) {
-    const qreal naturalMidX = (from.x() + to.x()) / 2.0;
-    if (obstacles.empty()) {
-        return naturalMidX;
-    }
-    const qreal yMin = std::min(from.y(), to.y());
-    const qreal yMax = std::max(from.y(), to.y());
-    const auto isClear = [&](qreal x) {
-        for (const QRectF& rect : obstacles) {
-            if (verticalSegmentCrosses(x, yMin, yMax, rect)) {
-                return false;
-            }
-        }
-        return true;
-    };
-    if (isClear(naturalMidX)) {
-        return naturalMidX;
-    }
-    constexpr qreal kStep = 16.0; // 2x ComponentItem::kGridSize
-    constexpr int kMaxSteps = 24; // hasta 384px a cada lado del punto medio
-    for (int i = 1; i <= kMaxSteps; ++i) {
-        const qreal plus = naturalMidX + i * kStep;
-        if (isClear(plus)) {
-            return plus;
-        }
-        const qreal minus = naturalMidX - i * kStep;
-        if (isClear(minus)) {
-            return minus;
-        }
-    }
-    return naturalMidX;
-}
-
-// Agrega a `path` (que ya debe empezar en `from`) los quiebres en angulo
-// recto que llevan hasta `to`. Se degenera a una sola linea recta cuando
-// `from`/`to` ya comparten x o y (exactamente, o dentro de
-// kAlignTolerance) -- por eso el mismo helper sirve tanto para el
-// auto-ruteo entre extremos como para el tramo entre dos waypoints
-// consecutivos, sin duplicar codos donde no hacen falta. `obstacles`
-// (bounding rects de otros componentes, ver WireItem::obstacleRects()) se
-// usa para elegir donde cae el tramo vertical -- ver chooseClearMidX().
-void appendElbow(QPainterPath& path, QPointF from, QPointF to, const std::vector<QRectF>& obstacles) {
-    if (std::abs(from.y() - to.y()) <= kAlignTolerance) {
-        // Corre recto hasta la columna de `to` a la altura de `from`, y
-        // recien ahi (pegado al pin de destino) el salto vertical residual
-        // -- nunca en el medio del tramo, donde se leeria como un quiebre
-        // suelto.
-        path.lineTo(to.x(), from.y());
-        path.lineTo(to);
-        return;
-    }
-    if (std::abs(from.x() - to.x()) <= kAlignTolerance) {
-        path.lineTo(from.x(), to.y());
-        path.lineTo(to);
-        return;
-    }
-    const qreal midX = chooseClearMidX(from, to, obstacles);
-    path.lineTo(midX, from.y());
-    path.lineTo(midX, to.y());
-    path.lineTo(to);
-}
-
 qreal distanceToSegment(QPointF p, QPointF a, QPointF b, QPointF* projectionOut = nullptr) {
     const QPointF ab = b - a;
     const qreal lengthSquared = QPointF::dotProduct(ab, ab);
@@ -134,31 +56,6 @@ qreal distanceToSegment(QPointF p, QPointF a, QPointF b, QPointF* projectionOut 
         *projectionOut = projection;
     }
     return QLineF(p, projection).length();
-}
-
-// Los vertices que updateGeometry() realmente dibujaria para el tramo entre
-// `from` y `to` (los dos quiebres del auto-ruteo, mas `to`) -- se degenera
-// limpiamente a solo `to` cuando ya son colineales, igual que appendElbow().
-// Se usa para que el hit-testing de "punto mas cercano sobre el cable"
-// (insertar un vertice, dividir el cable) razone sobre la ruta realmente
-// dibujada -- que casi nunca coincide con la cuerda recta entre dos puntos
-// logicos consecutivos -- y no aparezca desalineada de lo que se ve.
-void appendElbowVertices(std::vector<QPointF>& vertices, QPointF from, QPointF to,
-                          const std::vector<QRectF>& obstacles) {
-    if (std::abs(from.y() - to.y()) <= kAlignTolerance) {
-        vertices.push_back(QPointF(to.x(), from.y()));
-        vertices.push_back(to);
-        return;
-    }
-    if (std::abs(from.x() - to.x()) <= kAlignTolerance) {
-        vertices.push_back(QPointF(from.x(), to.y()));
-        vertices.push_back(to);
-        return;
-    }
-    const qreal midX = chooseClearMidX(from, to, obstacles);
-    vertices.push_back(QPointF(midX, from.y()));
-    vertices.push_back(QPointF(midX, to.y()));
-    vertices.push_back(to);
 }
 
 QPointF maybeSnap(const CircuitScene* scene, QPointF point) {
@@ -180,9 +77,11 @@ WireItem::WireItem(CircuitDocument* document, QUndoStack* undoStack, uint32_t wi
       anchorA_(anchorA),
       anchorB_(anchorB) {
     setFlag(QGraphicsItem::ItemIsSelectable, true);
+    setAcceptHoverEvents(true);
     setZValue(-1.0); // dibuja los cables detras de los cuerpos de los componentes
-    // Un pen ancho a nivel de item solo ensancha shape()/boundingRect() para
-    // facilitar el clic; paint() siempre define su propio pen antes de dibujar.
+    // Un pen ancho a nivel de item solo ensancha boundingRect() para facilitar
+    // el clic; paint() siempre define su propio pen antes de dibujar y shape()
+    // recalcula la banda clickeable segun el zoom.
     setPen(QPen(Qt::black, 6.0));
     if (anchorA_.component != nullptr) anchorA_.component->addAttachedWire(this);
     if (anchorA_.junction != nullptr) anchorA_.junction->addAttachedWire(this);
@@ -273,10 +172,31 @@ QPointF WireItem::nearestPointOnPath(QPointF scenePos) const {
     return best;
 }
 
+QPointF WireItem::endpointHandlePos(bool isA) const {
+    const QPointF e = endpointScenePos(isA ? a_ : b_, isA ? anchorA_ : anchorB_);
+    const std::vector<QPointF> wp = storedWaypoints();
+    QPointF neighbor;
+    if (isA) {
+        neighbor = wp.empty() ? endpointScenePos(b_, anchorB_) : wp.front();
+    } else {
+        neighbor = wp.empty() ? endpointScenePos(a_, anchorA_) : wp.back();
+    }
+    QPointF d = neighbor - e;
+    const qreal len = std::hypot(d.x(), d.y());
+    if (len < 1e-3) {
+        return e;
+    }
+    d /= len;
+    const qreal offset = std::min(10.0, len * 0.5);
+    return e + d * offset;
+}
+
 void WireItem::updateGeometry() {
     prepareGeometryChange();
-    const QPointF start = endpointScenePos(a_, anchorA_);
-    const QPointF end = endpointScenePos(b_, anchorB_);
+    const QPointF start =
+        (endpointDragging_ && endpointDragIsA_) ? endpointDragPos_ : endpointScenePos(a_, anchorA_);
+    const QPointF end =
+        (endpointDragging_ && !endpointDragIsA_) ? endpointDragPos_ : endpointScenePos(b_, anchorB_);
     const std::vector<QPointF> waypoints = dragging_ ? dragWaypoints_ : storedWaypoints();
 
     std::vector<QPointF> points;
@@ -286,11 +206,7 @@ void WireItem::updateGeometry() {
     points.push_back(end);
 
     const std::vector<QRectF> obstacles = obstacleRects();
-    QPainterPath path(points.front());
-    for (std::size_t i = 0; i + 1 < points.size(); ++i) {
-        appendElbow(path, points[i], points[i + 1], obstacles);
-    }
-    setPath(path);
+    setPath(buildOrthogonalPath(points, obstacles));
 }
 
 void WireItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget*) {
@@ -298,15 +214,79 @@ void WireItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, 
     const bool selected = (option->state & QStyle::State_Selected) != 0;
 
     QPen pen(logicValueColor(value));
-    pen.setWidth(selected ? 3 : 2);
+    pen.setWidth(selected ? 3 : (hovered_ ? 3 : 2));
     if (selected) {
         pen.setStyle(Qt::DashLine);
     }
     painter->setPen(pen);
+    painter->setBrush(Qt::NoBrush);
     painter->drawPath(path());
+
+    // Handles de extremo: cuadritos en a_/b_ cuando el cable es la unica
+    // seleccion, para senalar que esos puntos son agarrables (la reconexion de
+    // extremos en si llega en la fase siguiente). Se dibujan a tamano constante
+    // en pixeles compensando el zoom, para que no crezcan/encojan con la vista.
+    if (selected && !endpointDragging_) {
+        qreal scale = 1.0;
+        if (scene() != nullptr && !scene()->views().isEmpty()) {
+            scale = scene()->views().first()->transform().m11();
+        }
+        if (scale <= 0.0) {
+            scale = 1.0;
+        }
+        const qreal half = 3.0 / scale;
+        painter->setPen(QPen(QColor(30, 90, 220), 1.0 / scale));
+        painter->setBrush(QColor(255, 255, 255));
+        for (const QPointF& p : {endpointHandlePos(true), endpointHandlePos(false)}) {
+            painter->drawRect(QRectF(p.x() - half, p.y() - half, 2.0 * half, 2.0 * half));
+        }
+    }
+}
+
+QPainterPath WireItem::shape() const {
+    qreal scale = 1.0;
+    if (scene() != nullptr && !scene()->views().isEmpty()) {
+        scale = scene()->views().first()->transform().m11();
+    }
+    if (scale <= 0.0) {
+        scale = 1.0;
+    }
+    QPainterPathStroker stroker;
+    // ~10px de banda clickeable en coordenadas de pantalla a cualquier zoom,
+    // con un piso de 6px en coordenadas de escena para no perder tolerancia al
+    // alejar mucho.
+    stroker.setWidth(std::max(6.0, 10.0 / scale));
+    return stroker.createStroke(path());
+}
+
+void WireItem::hoverEnterEvent(QGraphicsSceneHoverEvent* event) {
+    hovered_ = true;
+    update();
+    QGraphicsPathItem::hoverEnterEvent(event);
+}
+
+void WireItem::hoverLeaveEvent(QGraphicsSceneHoverEvent* event) {
+    hovered_ = false;
+    update();
+    QGraphicsPathItem::hoverLeaveEvent(event);
 }
 
 void WireItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
+    // Handles de extremo (solo con el cable seleccionado): agarrar uno inicia
+    // la reconexion de ese extremo a otro destino. Se prueba antes que los
+    // waypoints porque tiene prioridad sobre editar el trazado.
+    if (isSelected()) {
+        for (const bool isA : {true, false}) {
+            if (QLineF(event->scenePos(), endpointHandlePos(isA)).length() <= kVertexHitRadius) {
+                endpointDragging_ = true;
+                endpointDragIsA_ = isA;
+                endpointDragPos_ = endpointScenePos(isA ? a_ : b_, isA ? anchorA_ : anchorB_);
+                event->accept();
+                return;
+            }
+        }
+    }
+
     const std::vector<QPointF> waypoints = storedWaypoints();
     for (std::size_t i = 0; i < waypoints.size(); ++i) {
         if (QLineF(event->scenePos(), waypoints[i]).length() <= kVertexHitRadius) {
@@ -326,6 +306,25 @@ void WireItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
 }
 
 void WireItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
+    if (endpointDragging_) {
+        auto* circuitScene = qobject_cast<CircuitScene*>(scene());
+        // El preview sigue al destino bajo el cursor (pin/union) si lo hay, o
+        // al cursor snappeado a grilla; asi se ve a donde va a quedar el
+        // extremo antes de soltar.
+        QPointF pos = event->scenePos();
+        if (circuitScene != nullptr) {
+            if (PinItem* pin = circuitScene->pinItemAt(pos)) {
+                pos = pin->scenePos();
+            } else if (JunctionItem* junction = circuitScene->junctionItemAt(pos)) {
+                pos = junction->scenePos();
+            } else {
+                pos = maybeSnap(circuitScene, pos);
+            }
+        }
+        endpointDragPos_ = pos;
+        updateGeometry();
+        return;
+    }
     if (dragging_) {
         dragWaypoints_[static_cast<std::size_t>(dragIndex_)] =
             maybeSnap(qobject_cast<CircuitScene*>(scene()), event->scenePos());
@@ -350,6 +349,44 @@ void WireItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
 }
 
 void WireItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
+    if (endpointDragging_) {
+        endpointDragging_ = false;
+        auto* circuitScene = qobject_cast<CircuitScene*>(scene());
+        const bool isA = endpointDragIsA_;
+        const QPointF dropPoint = event->scenePos();
+
+        // Resolver el destino: pin o punto de union existente (soltar sobre el
+        // cuerpo de otro cable o en vacio no reconecta en esta fase).
+        std::optional<WireEndpoint> target;
+        if (circuitScene != nullptr) {
+            if (PinItem* pin = circuitScene->pinItemAt(dropPoint)) {
+                target = WireEndpoint(PinRef{pin->componentId(), pin->pinIndex()});
+            } else if (JunctionItem* junction = circuitScene->junctionItemAt(dropPoint)) {
+                target = WireEndpoint::junction(junction->junctionId());
+            }
+        }
+        const WireEndpoint current = isA ? a_ : b_;
+        const WireEndpoint other = isA ? b_ : a_;
+        if (!target.has_value() || *target == current || *target == other ||
+            !document_->requireEditable(QStringLiteral("reconectar un cable"))) {
+            updateGeometry(); // revertir el preview
+            return;
+        }
+
+        // Diferido al proximo tick: retargetWire() dispara wireAboutToBeRemoved
+        // que hace `delete` de este mismo WireItem -- destruir `this` dentro de
+        // su propio mouseReleaseEvent seria undefined behavior (mismo motivo
+        // que trySpliceAt). Solo se capturan copias por valor.
+        CircuitDocument* document = document_;
+        QUndoStack* undoStack = undoStack_;
+        const uint32_t wireId = wireId_;
+        const WireEndpoint newEndpoint = *target;
+        QTimer::singleShot(0, document, [document, undoStack, wireId, isA, newEndpoint] {
+            undoStack->push(new RetargetWireEndpointCommand(document, wireId, isA, newEndpoint));
+        });
+        return;
+    }
+
     pendingInsertAt_.reset();
     if (!dragging_) {
         QGraphicsPathItem::mouseReleaseEvent(event);
