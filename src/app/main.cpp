@@ -5,7 +5,9 @@
 #include <QPixmap>
 #include <QSplashScreen>
 
+#include "AppSettings.hpp"
 #include "MainWindow.hpp"
+#include "ui/Theme.hpp"
 
 namespace {
 
@@ -54,6 +56,12 @@ int main(int argc, char** argv) {
     QApplication::setApplicationName("DigitalForge");
     QApplication::setOrganizationName("DigitalForge");
 
+    // El tema se aplica antes de crear cualquier ventana (incluido el splash):
+    // asi arranca ya con la paleta definitiva, sin un parpadeo del tema
+    // anterior mientras se construye la interfaz.
+    digitalforge::ui::ThemeManager::instance().setMode(
+        digitalforge::ui::ThemeManager::fromSettingsValue(digitalforge::app::AppSettings::load().themeMode));
+
     QIcon appIcon;
     appIcon.addFile(":/icons/app_16.png");
     appIcon.addFile(":/icons/app_32.png");
@@ -75,6 +83,18 @@ int main(int argc, char** argv) {
     digitalforge::app::MainWindow window;
     window.show();
     splash.finish(&window);
+
+    // Archivo pasado como argumento: es la via por la que el Explorador abre
+    // un .dfproj/.dfc asociado (ver packaging/windows/DigitalForge.iss). Se
+    // toma el primer argumento que no sea una opcion, y se abre despues de
+    // show() para que cualquier dialogo de error tenga ventana padre visible.
+    for (int i = 1; i < argc; ++i) {
+        const QString argument = QString::fromLocal8Bit(argv[i]);
+        if (!argument.startsWith('-')) {
+            window.openFileAtStartup(argument);
+            break;
+        }
+    }
 
     return QApplication::exec();
 }
