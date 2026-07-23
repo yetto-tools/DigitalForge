@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace digitalforge::core {
 
@@ -102,6 +103,27 @@ enum class GateType : uint8_t {
         case GateType::WeakOne:      return "WeakOne";
     }
     return "Unknown";
+}
+
+// Inversa de toString(): mapea el nombre textual de un GateType (tal como
+// aparece en el netlist de una definicion de componente en JSON) al enum.
+// Devuelve true si `name` coincide exactamente con algun tipo; false si no.
+// Los nombres deben coincidir con los de toString() (p. ej. "And", "Xor",
+// "DFlipFlop"), de modo que ambos sentidos usen la misma ortografia.
+[[nodiscard]] constexpr bool gateTypeFromString(std::string_view name, GateType& out) noexcept {
+    constexpr GateType kAll[] = {
+        GateType::InputPin,       GateType::ConstantZero, GateType::ConstantOne,   GateType::Buffer,
+        GateType::Not,            GateType::And,          GateType::Or,            GateType::Nand,
+        GateType::Nor,            GateType::Xor,          GateType::Xnor,          GateType::DFlipFlop,
+        GateType::TriStateBuffer, GateType::WeakZero,     GateType::WeakOne,
+    };
+    for (const GateType type : kAll) {
+        if (name == toString(type)) {
+            out = type;
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace digitalforge::core
