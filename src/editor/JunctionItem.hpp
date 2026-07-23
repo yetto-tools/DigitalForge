@@ -44,11 +44,14 @@ public:
 
 protected:
     QVariant itemChange(GraphicsItemChange change, const QVariant& value) override;
+    void hoverEnterEvent(QGraphicsSceneHoverEvent* event) override;
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent* event) override;
 
 private:
     CircuitDocument* document_;
     uint32_t junctionId_;
     std::vector<WireItem*> attachedWires_;
+    bool hovered_ = false;
 };
 
 } // namespace digitalforge::editor
