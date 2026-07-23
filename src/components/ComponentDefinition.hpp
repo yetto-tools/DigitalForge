@@ -89,6 +89,25 @@ struct ComponentDefinition {
     std::string typeId;
     std::string displayName;
     std::string description;
+
+    // --- Versionado (ver components/ComponentFingerprints.hpp) ---
+    //
+    // Se incrementa ante cualquier cambio de la definicion que el usuario
+    // pueda notar: pines, propiedades, comportamiento o dibujo. Entra en
+    // publicInterfaceHash, de modo que un proyecto guardado puede detectar
+    // que la definicion instalada ya no es la que uso.
+    uint32_t definitionVersion = 1;
+    // Se incrementa SOLO cuando cambia lo que hace buildSimulation (netlist,
+    // primitivas, retardos, estado secuencial). buildSimulation es una
+    // closure de C++: no hay forma de hashear su cuerpo, asi que esta version
+    // declarada es la unica manera de que simulationHash refleje el cambio.
+    // Olvidarse de subirla no rompe proyectos, pero deja una cache de
+    // simulacion sin invalidar.
+    uint32_t behaviorVersion = 1;
+    // Idem para el dibujo en el lienzo (ComponentItem::paint*). Subirla sola
+    // clasifica el cambio como puramente visual, que no toca conexiones ni
+    // propiedades ni obliga a reconstruir la simulacion.
+    uint32_t appearanceVersion = 1;
     // Numero de parte real (p. ej. "7400"), vacio si no aplica. Solo lo
     // usan los ic74ls.* de numero fijo - ComponentItem::paintIc74ls() lo
     // dibuja rotado en el hueco central del cuerpo para poder distinguir a
