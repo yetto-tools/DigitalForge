@@ -28,3 +28,13 @@ _deps/
 
 # Scratch/manual-testing artifacts (not part of the product)
 scratch_*
+
+# Artefactos generados por el empaquetado del instalador de Windows
+packaging/windows/dist/
+packaging/windows/output/
+
+# Artefactos generados por el empaquetado del Flatpak de Linux
+.flatpak-builder/
+packaging/linux/build-dir/
+packaging/linux/.flatpak-builder/
+*.flatpak
