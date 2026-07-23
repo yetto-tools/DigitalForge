@@ -27,6 +27,9 @@ public:
     [[nodiscard]] core::PinDirection direction() const noexcept { return direction_; }
 
     void paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget) override;
+    // Ampliado respecto del circulo del pin para que quepa el halo de hover
+    // sin dejar artefactos de repintado (Qt recorta el pintado al boundingRect).
+    [[nodiscard]] QRectF boundingRect() const override;
 
     static constexpr qreal kRadius = 3.0;
 
@@ -46,12 +49,15 @@ protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
     void mouseMoveEvent(QGraphicsSceneMouseEvent* event) override;
     void mouseReleaseEvent(QGraphicsSceneMouseEvent* event) override;
+    void hoverEnterEvent(QGraphicsSceneHoverEvent* event) override;
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent* event) override;
 
 private:
     CircuitDocument* document_;
     uint32_t componentId_;
     uint16_t pinIndex_;
     core::PinDirection direction_;
+    bool hovered_ = false;
 };
 
 } // namespace digitalforge::editor
