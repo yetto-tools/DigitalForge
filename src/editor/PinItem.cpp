@@ -1,7 +1,9 @@
 #include "PinItem.hpp"
 
+#include <QGraphicsSceneHoverEvent>
 #include <QGraphicsSceneMouseEvent>
 #include <QPainter>
+#include <QPolygonF>
 
 #include "CircuitDocument.hpp"
 #include "LogicColors.hpp"
@@ -36,6 +38,8 @@ PinItem::PinItem(CircuitDocument* document, uint32_t componentId, uint16_t pinIn
     setAcceptHoverEvents(true);
 }
 
+QRectF PinItem::boundingRect() const { return QGraphicsEllipseItem::boundingRect().adjusted(-4.0, -4.0, 4.0, 4.0); }
+
 void PinItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*) {
     const core::LogicValue value = document_->pinValue(componentId_, pinIndex_);
     // io.ledMatrix posiciona cada pin exactamente sobre su propia celda (ver
@@ -56,13 +60,45 @@ void PinItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*
         painter->drawEllipse(rect());
         return;
     }
+    // Halo al pasar el mouse: un anillo translucido detras del pin para
+    // senalar que es un punto de conexion agarrable (desde donde se puede
+    // empezar un cable), sin alterar el color de estado logico.
+    if (hovered_) {
+        const qreal haloR = rect().width() * 0.9 + 2.0;
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(60, 130, 255, 90));
+        painter->drawEllipse(QPointF(0.0, 0.0), haloR, haloR);
+    }
     painter->setPen(QPen(Qt::black, 1.0));
     painter->setBrush(logicValueColor(value));
+    // La punta de flecha se reserva para los puertos Entrada/Salida
+    // (wiring.input/wiring.output), donde refuerza el sentido del flujo. En
+    // las compuertas caia justo sobre la punta del cuerpo y confundia la
+    // lectura (defecto reportado), asi que ahi -y en cualquier otro tipo- el
+    // pin vuelve a ser un circulo.
+    const bool isPort =
+        instance != nullptr && (instance->typeId() == "wiring.input" || instance->typeId() == "wiring.output");
+    if (isPort && direction_ == core::PinDirection::Output) {
+        const qreal r = rect().width() / 2.0;
+        QPolygonF arrow;
+        arrow << QPointF(-r, -r) << QPointF(-r, r) << QPointF(r, 0.0);
+        painter->drawPolygon(arrow);
+        return;
+    }
     painter->drawEllipse(rect());
 }
 
 void PinItem::mousePressEvent(QGraphicsSceneMouseEvent* event) { event->accept(); }
 void PinItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event) { event->accept(); }
 void PinItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) { event->accept(); }
+
+void PinItem::hoverEnterEvent(QGraphicsSceneHoverEvent*) {
+    hovered_ = true;
+    update();
+}
+void PinItem::hoverLeaveEvent(QGraphicsSceneHoverEvent*) {
+    hovered_ = false;
+    update();
+}
 
 } // namespace digitalforge::editor
