@@ -30,6 +30,10 @@ public:
     [[nodiscard]] const ComponentDefinition& definition() const noexcept { return *definition_; }
 
     [[nodiscard]] const PropertyValue& property(const std::string& id) const;
+    // Mapa completo de propiedades (los defaults de la definicion con los
+    // overrides ya aplicados). Lo necesitan derivePins()/buildSimulation() y
+    // el calculo de huellas de compatibilidad.
+    [[nodiscard]] const PropertyMap& properties() const noexcept { return properties_; }
 
     // Valida `value` contra el descriptor de la definicion para `id`, y
     // luego lo aplica. Lanza std::invalid_argument si `id` es desconocido o
