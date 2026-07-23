@@ -4,6 +4,8 @@
 #include <QPalette>
 #include <QStyle>
 #include <QStyleFactory>
+#include <QStyleHints>
+#include <QWidget>
 
 namespace digitalforge::ui {
 
@@ -70,6 +72,16 @@ QPalette buildLightPalette() {
     return palette;
 }
 
+// style()->standardPalette() no distingue claro/oscuro (es la paleta
+// generica del estilo, no la del SO), y una vez que se fuerza una paleta
+// propia Qt ya no vuelve a sincronizarla sola con el tema del sistema. Por
+// eso el modo Sistema arma su propia paleta a partir de lo que reporta
+// QStyleHints::colorScheme(), que si sigue el registro de Windows en vivo.
+void applySystemPalette() {
+    const bool dark = QApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
+    QApplication::setPalette(dark ? buildDarkPalette() : buildLightPalette());
+}
+
 } // namespace
 
 ThemeManager& ThemeManager::instance() {
@@ -83,6 +95,15 @@ void ThemeManager::setMode(ThemeMode mode) {
         // singleton puede crearse antes que QApplication.
         nativeStyleName_ = QApplication::style() != nullptr ? QApplication::style()->objectName() : QString();
         nativeCaptured_ = true;
+
+        // Si el modo es Sistema y el usuario cambia el tema del SO mientras
+        // la app esta abierta, hay que rearmar la paleta: colorSchemeChanged
+        // avisa el cambio pero no reaplica nada por si solo.
+        connect(QApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this](Qt::ColorScheme) {
+            if (mode_ == ThemeMode::System) {
+                setMode(ThemeMode::System);
+            }
+        });
     }
 
     const bool sameMode = mode == mode_ && mode != ThemeMode::System;
@@ -90,13 +111,12 @@ void ThemeManager::setMode(ThemeMode mode) {
 
     switch (mode) {
         case ThemeMode::System:
-            // Volver al estilo nativo y soltar la paleta propia: a partir de
-            // aca manda de nuevo la configuracion del sistema, que Qt aplica
-            // sola (y notifica por QStyleHints::colorSchemeChanged).
+            // Estilo nativo, pero con paleta propia calculada segun el
+            // esquema de color real del SO (ver applySystemPalette()).
             if (!nativeStyleName_.isEmpty()) {
                 QApplication::setStyle(QStyleFactory::create(nativeStyleName_));
             }
-            QApplication::setPalette(QApplication::style()->standardPalette());
+            applySystemPalette();
             break;
         case ThemeMode::Light:
             QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
@@ -106,6 +126,17 @@ void ThemeManager::setMode(ThemeMode mode) {
             QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
             QApplication::setPalette(buildDarkPalette());
             break;
+    }
+
+    // setStyle()/setPalette() no repintan por si solos las ventanas ya
+    // abiertas (p. ej. al volver de Fusion al estilo nativo en Windows los
+    // fondos de botones quedan con los colores viejos hasta el proximo
+    // resize). Se fuerza un repolish + repintado de todo lo que ya existe.
+    QStyle* style = QApplication::style();
+    for (QWidget* widget : QApplication::allWidgets()) {
+        style->unpolish(widget);
+        style->polish(widget);
+        widget->update();
     }
 
     if (!sameMode) {
