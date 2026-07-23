@@ -161,6 +161,45 @@ void CircuitDocument::setWireWaypoints(uint32_t wireId, std::vector<QPointF> way
     emit wireGeometryChanged(wireId);
 }
 
+bool CircuitDocument::retargetWire(uint32_t wireId, bool endIsA, WireEndpoint newEndpoint) {
+    const auto it = wires_.find(wireId);
+    if (it == wires_.end()) {
+        return false;
+    }
+    // El nuevo destino debe existir.
+    if (!newEndpoint.isJunction) {
+        const auto* comp = component(newEndpoint.id);
+        if (comp == nullptr || newEndpoint.pinIndex >= comp->pins().size()) {
+            return false;
+        }
+    } else if (!junctions_.contains(newEndpoint.id)) {
+        return false;
+    }
+
+    WireConnection updated = it->second;
+    const WireEndpoint old = endIsA ? updated.a : updated.b;
+    (endIsA ? updated.a : updated.b) = newEndpoint;
+    if (updated.a == updated.b) {
+        return false; // no se permite un cable conectado a si mismo
+    }
+
+    // Recrear el WireItem para que la vista tome la nueva ancla: mismo id, se
+    // emite quitar+agregar. No se toca el otro extremo.
+    emit wireAboutToBeRemoved(wireId);
+    wires_[wireId] = updated;
+    emit wireAdded(wireId);
+
+    // Si el extremo viejo era un punto de union y este era su ultimo cable,
+    // queda huerfano (grado 0): se elimina, igual que eraseWireCascading().
+    if (old.isJunction && wiresAttachedToJunction(old.id).empty()) {
+        emit junctionAboutToBeRemoved(old.id);
+        junctions_.erase(old.id);
+    }
+
+    rebuildSimulation();
+    return true;
+}
+
 const WireConnection* CircuitDocument::wire(uint32_t wireId) const {
     const auto it = wires_.find(wireId);
     return it == wires_.end() ? nullptr : &it->second;
@@ -199,6 +238,14 @@ void CircuitDocument::addJunctionWithId(uint32_t junctionId, QPointF position) {
     junctions_[junctionId] = position;
     nextJunctionId_ = std::max(nextJunctionId_, junctionId + 1);
     emit junctionAdded(junctionId);
+}
+
+void CircuitDocument::removeJunction(uint32_t junctionId) {
+    if (!junctions_.contains(junctionId) || !wiresAttachedToJunction(junctionId).empty()) {
+        return;
+    }
+    emit junctionAboutToBeRemoved(junctionId);
+    junctions_.erase(junctionId);
 }
 
 QPointF CircuitDocument::junctionPosition(uint32_t junctionId) const {
@@ -344,6 +391,18 @@ void CircuitDocument::rebuildSimulation() {
         const auto [it, inserted] = tunnelByLabel.try_emplace(label, ref);
         if (!inserted) {
             dsuUnion(parent, it->second, ref);
+        }
+    }
+
+    // Uniones geometricas provistas por la vista (coincidencia en la misma
+    // celda de grilla, o derivacion en T donde un extremo cae sobre el cuerpo
+    // de otro cable). Se guarda contra extremos ya inexistentes (provider
+    // desfasado) verificando que ambos esten sembrados en el union-find.
+    if (geometricConnectionProvider_) {
+        for (const auto& [a, b] : geometricConnectionProvider_()) {
+            if (parent.contains(a) && parent.contains(b)) {
+                dsuUnion(parent, a, b);
+            }
         }
     }
 
@@ -744,5 +803,12 @@ void CircuitDocument::setSiblingResolver(std::function<const CircuitDocument*(co
         rebuildSimulation();
     }
 }
+
+void CircuitDocument::setGeometricConnectionProvider(GeometricConnectionProvider provider) {
+    geometricConnectionProvider_ = std::move(provider);
+    rebuildSimulation();
+}
+
+void CircuitDocument::recomputeConnectivity() { rebuildSimulation(); }
 
 } // namespace digitalforge::editor
