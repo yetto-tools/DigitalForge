@@ -4,6 +4,20 @@ Editor y simulador de lógica digital multiplataforma, con una implementación
 propia (no derivada de Logisim Evolution) optimizada para manejar grandes
 cantidades de compuertas y circuitos integrados.
 
+## Descargas
+
+Los binarios de cada versión están en la
+[sección de Releases](https://github.com/yetto-tools/DigitalForge/releases):
+
+- **Windows**: `DigitalForge-Setup-<versión>.exe` (instalador).
+- **Linux**: `DigitalForge-<versión>-x86_64.AppImage` (dale permiso de
+  ejecución con `chmod +x` y córrelo directamente).
+
+La aplicación comprueba al arrancar si hay una versión más nueva publicada y lo
+avisa; también se puede consultar manualmente desde **Ayuda → Buscar
+actualizaciones**. Los releases los construye y publica automáticamente GitHub
+Actions (ver `.github/workflows/release.yml`) al empujar un tag `v*`.
+
 ## Estado del proyecto
 
 Versión actual: **0.1.0** (pre-alpha). El núcleo de simulación y el editor
@@ -47,6 +61,20 @@ cablearlos, simular y guardar/abrir proyectos.
 - E/S: LED, display hexadecimal, matriz LED (directa y multiplexada),
   terminal; sonda de depuración; subcircuitos.
 
+### Componentes definidos en JSON (Fase 3)
+
+Además de la biblioteca integrada en C++, se pueden agregar tipos de
+componente en archivos JSON, sin recompilar. Cada archivo declara pines fijos
+y un comportamiento como *netlist* de compuertas primitivas del núcleo
+(`And`/`Or`/`Xor`/`Not`/`DFlipFlop`/`TriStateBuffer`/constantes/...). Al
+arrancar se cargan los `*.json` de `components/` (junto al ejecutable) o de la
+carpeta indicada por `DIGITALFORGE_COMPONENTS_DIR`; un archivo malformado se
+reporta y no impide cargar el resto. El formato, la validación y los ejemplos
+están en [docs/component-format.md](docs/component-format.md).
+
+Esto **no** es DFML todavía: es un cargador declarativo para combinacionales y
+secuenciales armados de primitivas, no un lenguaje con compilador.
+
 ### Persistencia, formatos y compatibilidad
 
 - Proyectos en JSON (`.dfproj` / `.dfc`) con `ProjectSerializer` y manifiesto.
@@ -65,12 +93,14 @@ cablearlos, simular y guardar/abrir proyectos.
 
 ## Limitaciones actuales
 
-- Las bibliotecas de componentes son código C++ integrado; el lenguaje DFML,
-  su compilador (DFMC) y los paquetes externos (DFLIB) aún no existen.
+- El lenguaje DFML, su compilador (DFMC) y los paquetes externos (DFLIB) aún no
+  existen. Los componentes vienen de la biblioteca integrada en C++ o de
+  archivos JSON por netlist (ver arriba); esa carga JSON todavía no permite
+  pines ni comportamiento dependientes de propiedades (netlist fijo), y dibuja
+  los componentes con la caja genérica.
 - La metadata desconocida no crítica se pierde al reguardar (criterio 29) y el
   reporte de compatibilidad todavía no se muestra en la interfaz (criterio 30).
-- Los buses de múltiples bits y los retardos de propagación configurables aún
-  no están implementados.
+- Los buses de múltiples bits aún no están implementados (cada net es de 1 bit).
 - Reordenar los pines de una definición ya colocada aún reconecta mal en
   caliente (la reconexión por clave solo protege la carga de proyectos).
 
@@ -170,11 +200,18 @@ aleatoria con semilla fija) en tamaños de 10,000 / 100,000 / 1,000,000
 compuertas, y reporta eventos procesados, tiempo de estabilización y una
 estimación de memoria.
 
-## Formato de bibliotecas
+## Formato de componentes
 
-Hoy los componentes se definen como `ComponentDefinition` en C++
-(`src/components/BasicComponentLibrary.cpp`) y se registran en un
-`ComponentRegistry` en memoria. A futuro se definirán mediante el lenguaje
-DFML y se empaquetarán como bibliotecas externas (DFLIB); la capa de metadata
-y compatibilidad ya está preparada para ese modelo (ver
+Los componentes se registran en un `ComponentRegistry` en memoria desde dos
+fuentes:
+
+- La **biblioteca integrada en C++** (`src/components/BasicComponentLibrary.cpp`),
+  que cubre los tipos paramétricos (ancho configurable, etc.) y los 74LSxx.
+- **Archivos JSON por netlist** que se cargan al arrancar sin recompilar — la
+  Fase 3. Formato, validación y ejemplos en
+  [docs/component-format.md](docs/component-format.md).
+
+A futuro, los componentes también se podrán definir con el lenguaje DFML y
+empaquetar como bibliotecas externas (DFLIB); la capa de metadata y
+compatibilidad ya está preparada para ese modelo (ver
 [docs/dfml-metadata-status.md](docs/dfml-metadata-status.md)).
