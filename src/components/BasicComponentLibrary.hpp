@@ -76,10 +76,29 @@ struct HexDisplayState {
 [[nodiscard]] HexDisplayState hexDisplayState(const ComponentInstance& display, core::LogicValue bit0,
                                                core::LogicValue bit1, core::LogicValue bit2, core::LogicValue bit3);
 
-// Igual que ledIsLit(), pero para una celda de una instancia io.ledMatrix
-// (respeta la misma propiedad "activeHigh"). Lanza std::invalid_argument si
-// `matrix` no es una instancia io.ledMatrix.
+// Lado maximo de una io.ledMatrix con conexion directa (un pin por celda):
+// mas alla de 8x8 la cantidad de pines deja de ser manejable a mano. La
+// variante multiplexada no tiene este limite porque usa filas+columnas pines.
+inline constexpr uint64_t kLedMatrixMaxDirectSide = 8;
+
+// True si la io.ledMatrix descrita por `properties` usa pines de fila/columna
+// en vez de un pin por celda. Tolera mapas sin la propiedad "wiring"
+// (proyectos guardados antes de que existiera), en cuyo caso es directa.
+[[nodiscard]] bool ledMatrixIsMultiplexed(const PropertyMap& properties);
+[[nodiscard]] bool ledMatrixIsMultiplexed(const ComponentInstance& matrix);
+
+// Igual que ledIsLit(), pero para una celda de una instancia io.ledMatrix con
+// conexion directa (respeta la misma propiedad "activeHigh"). Lanza
+// std::invalid_argument si `matrix` no es una instancia io.ledMatrix.
 [[nodiscard]] bool ledMatrixCellIsLit(const ComponentInstance& matrix, core::LogicValue netValue);
+
+// Estado de una celda de una io.ledMatrix multiplexada: encendida solo si su
+// fila esta en el nivel activo (propiedad "activeHigh") y su columna en el
+// nivel contrario, que es como conduce un panel real (la fila alimenta y la
+// columna drena). Cualquier valor que no sea un 0/1 limpio deja la celda
+// apagada. Lanza std::invalid_argument si `matrix` no es una io.ledMatrix.
+[[nodiscard]] bool ledMatrixMultiplexedCellIsLit(const ComponentInstance& matrix, core::LogicValue rowValue,
+                                                  core::LogicValue colValue);
 
 // Decodifica las 8 entradas bit0..bit7 (bit0 = LSB) de una instancia
 // io.terminal como un caracter ASCII. Devuelve std::nullopt si alguna
