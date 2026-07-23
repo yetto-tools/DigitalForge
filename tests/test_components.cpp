@@ -27,6 +27,7 @@ using digitalforge::components::hexDisplayState;
 using digitalforge::components::inputInitialValue;
 using digitalforge::components::ledIsLit;
 using digitalforge::components::ledMatrixCellIsLit;
+using digitalforge::components::ledMatrixMultiplexedCellIsLit;
 using digitalforge::components::parseLogicValueEnum;
 using digitalforge::components::PropertyValue;
 using digitalforge::components::registerBasicComponentLibrary;
@@ -1396,6 +1397,58 @@ TEST_CASE("LED matrix exposes rows*cols pins named R{r}C{c} and honors activeHig
         registry.create("io.ledMatrix", 1, {{"activeHigh", PropertyValue{false}}});
     CHECK(ledMatrixCellIsLit(activeLow, LogicValue::Zero));
     CHECK_FALSE(ledMatrixCellIsLit(activeLow, LogicValue::One));
+}
+
+TEST_CASE("Multiplexed LED matrix exposes rows+cols pins instead of one per cell",
+          "[components][ledMatrix]") {
+    ComponentRegistry registry = makeRegistry();
+
+    const ComponentInstance matrix =
+        registry.create("io.ledMatrix", 0,
+                        {{"rows", PropertyValue{uint64_t{2}}},
+                          {"cols", PropertyValue{uint64_t{3}}},
+                          {"wiring", PropertyValue{std::string("multiplexed")}}});
+    // 2x3 celdas con solo 2+3 pines, contra los 6 de la conexion directa.
+    REQUIRE(matrix.pins().size() == 5);
+    CHECK(matrix.pins()[0].name == "F0");
+    CHECK(matrix.pins()[1].name == "F1");
+    CHECK(matrix.pins()[2].name == "C0");
+    CHECK(matrix.pins()[4].name == "C2");
+
+    // Un panel de 16x16 es viable multiplexado (32 pines) y se recorta a 8x8
+    // en conexion directa, donde serian 256.
+    const ComponentInstance big =
+        registry.create("io.ledMatrix", 1,
+                        {{"rows", PropertyValue{uint64_t{16}}},
+                          {"cols", PropertyValue{uint64_t{16}}},
+                          {"wiring", PropertyValue{std::string("multiplexed")}}});
+    CHECK(big.pins().size() == 32);
+    const ComponentInstance bigDirect = registry.create(
+        "io.ledMatrix", 2, {{"rows", PropertyValue{uint64_t{16}}}, {"cols", PropertyValue{uint64_t{16}}}});
+    CHECK(bigDirect.pins().size() == 64);
+}
+
+TEST_CASE("Multiplexed LED matrix cell lights only when its row drives and its column sinks",
+          "[components][ledMatrix]") {
+    ComponentRegistry registry = makeRegistry();
+
+    const ComponentInstance matrix =
+        registry.create("io.ledMatrix", 0, {{"wiring", PropertyValue{std::string("multiplexed")}}});
+    // Activo en alto por defecto: fila en One, columna en Zero.
+    CHECK(ledMatrixMultiplexedCellIsLit(matrix, LogicValue::One, LogicValue::Zero));
+    CHECK_FALSE(ledMatrixMultiplexedCellIsLit(matrix, LogicValue::One, LogicValue::One));
+    CHECK_FALSE(ledMatrixMultiplexedCellIsLit(matrix, LogicValue::Zero, LogicValue::Zero));
+    // Una fila sin atacar (flotante) no enciende nada, aunque la columna drene.
+    CHECK_FALSE(ledMatrixMultiplexedCellIsLit(matrix, LogicValue::HighImpedance, LogicValue::Zero));
+    CHECK_FALSE(ledMatrixMultiplexedCellIsLit(matrix, LogicValue::One, LogicValue::Error));
+
+    // Polaridad invertida: la fila alimenta en bajo y la columna drena en alto.
+    const ComponentInstance activeLow =
+        registry.create("io.ledMatrix", 1,
+                        {{"wiring", PropertyValue{std::string("multiplexed")}},
+                          {"activeHigh", PropertyValue{false}}});
+    CHECK(ledMatrixMultiplexedCellIsLit(activeLow, LogicValue::Zero, LogicValue::One));
+    CHECK_FALSE(ledMatrixMultiplexedCellIsLit(activeLow, LogicValue::One, LogicValue::Zero));
 }
 
 TEST_CASE("LED matrix cells read back through the simulator like independent LEDs", "[components][ledMatrix]") {
