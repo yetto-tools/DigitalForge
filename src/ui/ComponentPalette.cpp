@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "IconFactory.hpp"
+#include "Theme.hpp"
 #include "components/ComponentDefinition.hpp"
 
 namespace digitalforge::ui {
@@ -95,6 +96,8 @@ ComponentPalette::ComponentPalette(const components::ComponentRegistry& registry
     });
     connect(QApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
             [this](Qt::ColorScheme) { refreshIcons(); });
+    // Forzar un tema cambia la paleta a mano, sin emitir colorSchemeChanged.
+    connect(&ThemeManager::instance(), &ThemeManager::changed, this, [this] { refreshIcons(); });
 
     populate();
 }
