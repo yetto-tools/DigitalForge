@@ -39,4 +39,30 @@ void appendElbowVertices(std::vector<QPointF>& vertices, QPointF from, QPointF t
 [[nodiscard]] QPainterPath buildOrthogonalPath(const std::vector<QPointF>& points,
                                                const std::vector<QRectF>& obstacles);
 
+// Todos los vertices por los que pasa la ruta ortogonal que une `points`
+// (>=2), incluidos los codos que appendElbowVertices() inserta para esquivar
+// `obstacles`, ya simplificados con simplifyOrthogonalPolyline(). Es la version
+// en vector de buildOrthogonalPath(): el editor la usa para saber donde estan
+// las esquinas VISIBLES del cable (aunque no sean waypoints guardados) y
+// poder agarrarlas.
+[[nodiscard]] std::vector<QPointF> orthogonalVertices(const std::vector<QPointF>& points,
+                                                      const std::vector<QRectF>& obstacles);
+
+// Quita de una polilinea los vertices redundantes: duplicados consecutivos
+// (dentro de kWireAlignTolerance) y puntos colineales (un vertice que cae
+// sobre la recta entre su vecino anterior y el siguiente, es decir, no es una
+// esquina real). Deja la minima secuencia de esquinas reales, de modo que
+// arrastrar una esquina mueva un vertice significativo y no un punto
+// degenerado.
+[[nodiscard]] std::vector<QPointF> simplifyOrthogonalPolyline(const std::vector<QPointF>& vertices);
+
+// Dibuja un cable YA EDITADO por el usuario, cuya lista de puntos (extremos +
+// waypoints) ya describe la forma deseada: cada tramo se dibuja recto si sus
+// extremos comparten x o y, y con un unico codo en L (horizontal primero) si
+// no -- sin el codo en Z centrado ni el desvio por obstaculos de
+// buildOrthogonalPath(). Asi, mover una esquina mueve exactamente esa esquina,
+// sin que el trazado "salte" (el defecto reportado). Los cables sin waypoints
+// siguen usando buildOrthogonalPath() (auto-ruteo con esquive).
+[[nodiscard]] QPainterPath buildEditedWirePath(const std::vector<QPointF>& points);
+
 } // namespace digitalforge::editor
