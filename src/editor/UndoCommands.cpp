@@ -199,14 +199,31 @@ void SetZOrderCommand::apply(int zOrder) {
 
 // --- AddWireCommand --------------------------------------------------
 
-AddWireCommand::AddWireCommand(CircuitDocument* document, WireEndpoint a, WireEndpoint b, QUndoCommand* parent)
-    : QUndoCommand(parent), document_(document), wireId_(document->reserveWireId()), a_(a), b_(b) {
+AddWireCommand::AddWireCommand(CircuitDocument* document, WireEndpoint a, WireEndpoint b, std::vector<QPointF> waypoints,
+                               QUndoCommand* parent)
+    : QUndoCommand(parent),
+      document_(document),
+      wireId_(document->reserveWireId()),
+      a_(a),
+      b_(b),
+      waypoints_(std::move(waypoints)) {
     setText("Anadir cable");
 }
 
-void AddWireCommand::redo() { document_->restoreWire(WireConnection{wireId_, a_, b_, {}}); }
+void AddWireCommand::redo() { document_->restoreWire(WireConnection{wireId_, a_, b_, waypoints_}); }
 
 void AddWireCommand::undo() { document_->removeWire(wireId_); }
+
+// --- AddJunctionCommand --------------------------------------------------
+
+AddJunctionCommand::AddJunctionCommand(CircuitDocument* document, QPointF position, QUndoCommand* parent)
+    : QUndoCommand(parent), document_(document), junctionId_(document->reserveJunctionId()), position_(position) {
+    setText("Anadir punto de union");
+}
+
+void AddJunctionCommand::redo() { document_->addJunctionWithId(junctionId_, position_); }
+
+void AddJunctionCommand::undo() { document_->removeJunction(junctionId_); }
 
 // --- DeleteWireCommand --------------------------------------------------
 
@@ -290,6 +307,33 @@ bool SetWireWaypointsCommand::mergeWith(const QUndoCommand* other) {
     }
     newWaypoints_ = set->newWaypoints_;
     return true;
+}
+
+// --- RetargetWireEndpointCommand --------------------------------------------------
+
+RetargetWireEndpointCommand::RetargetWireEndpointCommand(CircuitDocument* document, uint32_t wireId, bool endIsA,
+                                                         WireEndpoint newEndpoint, QUndoCommand* parent)
+    : QUndoCommand(parent), document_(document), wireId_(wireId), endIsA_(endIsA), newEndpoint_(newEndpoint) {
+    const WireConnection* w = document->wire(wireId);
+    if (w != nullptr) {
+        oldEndpoint_ = endIsA ? w->a : w->b;
+        // Si el extremo viejo es un punto de union del que este es el unico
+        // cable, la reconexion lo dejara huerfano y retargetWire() lo
+        // eliminara -- se captura aca para poder recrearlo en undo().
+        if (oldEndpoint_.isJunction && document->wiresAttachedToJunction(oldEndpoint_.id).size() == 1) {
+            orphanedJunction_ = Junction{oldEndpoint_.id, document->junctionPosition(oldEndpoint_.id)};
+        }
+    }
+    setText("Reconectar extremo de cable");
+}
+
+void RetargetWireEndpointCommand::redo() { document_->retargetWire(wireId_, endIsA_, newEndpoint_); }
+
+void RetargetWireEndpointCommand::undo() {
+    if (orphanedJunction_.has_value()) {
+        document_->addJunctionWithId(orphanedJunction_->id, orphanedJunction_->position);
+    }
+    document_->retargetWire(wireId_, endIsA_, oldEndpoint_);
 }
 
 // --- ChangePropertyCommand --------------------------------------------------
