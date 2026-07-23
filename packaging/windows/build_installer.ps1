@@ -55,6 +55,14 @@ foreach ($dll in @("libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll
     Copy-Item (Join-Path $mingwBin $dll) $distDir -Force
 }
 
+# Componentes definidos en JSON (Fase 3): se cargan desde "<carpeta del exe>\components"
+# al arrancar, asi que deben viajar junto al ejecutable dentro del instalador.
+$componentsSrc = Join-Path $repoRoot "components"
+if (Test-Path $componentsSrc) {
+    Write-Host "Incluyendo la biblioteca de componentes JSON..."
+    Copy-Item $componentsSrc (Join-Path $distDir "components") -Recurse -Force
+}
+
 $isccCandidates = @(
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
     "C:\Program Files\Inno Setup 6\ISCC.exe",

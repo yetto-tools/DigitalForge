@@ -1,0 +1,16 @@
+{
+  "typeId": "custom.halfAdder",
+  "displayName": "Medio sumador",
+  "description": "Medio sumador de 1 bit: S = A XOR B (suma), C = A AND B (acarreo). Dos pines de salida, cada uno manejado por su propia compuerta.",
+  "category": "Arithmetic",
+  "pins": [
+    {"name": "A", "dir": "in"},
+    {"name": "B", "dir": "in"},
+    {"name": "S", "dir": "out"},
+    {"name": "C", "dir": "out"}
+  ],
+  "netlist": [
+    {"gate": "Xor", "in": ["A", "B"], "out": "S"},
+    {"gate": "And", "in": ["A", "B"], "out": "C"}
+  ]
+}

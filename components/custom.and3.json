@@ -1,0 +1,16 @@
+{
+  "typeId": "custom.and3",
+  "displayName": "AND-3",
+  "description": "Compuerta AND de tres entradas, armada con dos AND de dos entradas.",
+  "category": "Gates",
+  "pins": [
+    {"name": "A", "dir": "in"},
+    {"name": "B", "dir": "in"},
+    {"name": "C", "dir": "in"},
+    {"name": "Y", "dir": "out"}
+  ],
+  "netlist": [
+    {"gate": "And", "in": ["A", "B"], "out": "t"},
+    {"gate": "And", "in": ["t", "C"], "out": "Y"}
+  ]
+}

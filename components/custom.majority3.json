@@ -1,0 +1,18 @@
+{
+  "typeId": "custom.majority3",
+  "displayName": "Mayoria-3",
+  "description": "Votador de mayoria de tres entradas: la salida es 1 cuando al menos dos de las tres entradas son 1 (Y = AB + BC + AC).",
+  "category": "Gates",
+  "pins": [
+    {"name": "A", "dir": "in"},
+    {"name": "B", "dir": "in"},
+    {"name": "C", "dir": "in"},
+    {"name": "Y", "dir": "out"}
+  ],
+  "netlist": [
+    {"gate": "And", "in": ["A", "B"], "out": "ab"},
+    {"gate": "And", "in": ["B", "C"], "out": "bc"},
+    {"gate": "And", "in": ["A", "C"], "out": "ac"},
+    {"gate": "Or", "in": ["ab", "bc", "ac"], "out": "Y"}
+  ]
+}
