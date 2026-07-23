@@ -90,6 +90,16 @@ private:
     // tanto para insertar un vertice nuevo al arrastrar el cuerpo del cable
     // como al hacer doble clic sobre el.
     [[nodiscard]] std::size_t nearestSegmentInsertIndex(QPointF point, const std::vector<QPointF>& waypoints) const;
+    // Todas las esquinas VISIBLES del cable como una polilinea completa
+    // [extremo A, esquinas..., extremo B], incluyendo los codos auto-ruteados
+    // que todavia no son waypoints guardados. Es lo que permite agarrar y
+    // mover cualquier esquina, no solo las que el usuario ya creo a mano.
+    [[nodiscard]] std::vector<QPointF> renderedCorners() const;
+    // Al empezar a arrastrar la esquina `cornerIndex` de `fullPolyline`,
+    // recuerda si cada brazo (hacia el vecino previo y el siguiente) es
+    // horizontal, para deslizar ese vecino por el eje correcto y conservar el
+    // angulo recto durante todo el gesto.
+    void captureArmOrientations(const std::vector<QPointF>& fullPolyline, std::size_t cornerIndex);
     // Llamado al soltar un arrastre de vertice (ver mouseReleaseEvent()): si
     // `dropPoint` cae sobre el cuerpo de otro WireItem o sobre un
     // JunctionItem existente (ninguno de los dos extremos propios de este
@@ -120,6 +130,15 @@ private:
     bool hovered_ = false;
     int dragIndex_ = -1;
     std::vector<QPointF> dragWaypoints_;
+    // El vertice en arrastre se acaba de insertar sobre el cuerpo del cable
+    // (no es una esquina preexistente): se mueve libre sin arrastrar a sus
+    // vecinos, para "sacar" un desvio nuevo. Una esquina preexistente si
+    // desliza a sus vecinos (ver mouseMoveEvent).
+    bool dragInserted_ = false;
+    // Orientacion de cada brazo de la esquina en arrastre, capturada al
+    // agarrarla (ver captureArmOrientations()).
+    bool leftArmHorizontal_ = false;
+    bool rightArmHorizontal_ = false;
 
     // Estado de un arrastre de extremo en curso (reconexion): que extremo se
     // esta moviendo y a que punto de escena sigue mientras dura el gesto.
