@@ -2,10 +2,12 @@
 
 #include <QPointF>
 
+#include <vector>
+
 #include "CircuitDocument.hpp"
 
 class QGraphicsSceneMouseEvent;
-class QGraphicsLineItem;
+class QGraphicsPathItem;
 class QUndoStack;
 
 namespace digitalforge::editor {
@@ -47,6 +49,15 @@ public:
     void press(QGraphicsSceneMouseEvent* event);
     void move(QGraphicsSceneMouseEvent* event);
     void release(QGraphicsSceneMouseEvent* event);
+    // Cierra el trazado multi-segmento en curso conectando al destino bajo el
+    // cursor (doble clic). No-op si no hay un destino valido ahi.
+    void finishAt(QPointF scenePos);
+    // Aborta un trazado en curso (Esc / clic derecho). Publico para que
+    // CircuitScene lo dispare desde el teclado/menu contextual.
+    void cancel();
+    // True si hay un trazado multi-segmento en curso (para que CircuitScene
+    // sepa que Esc/clic-derecho deben cancelarlo en vez de su accion normal).
+    [[nodiscard]] bool isDrawing() const noexcept { return drawing_; }
 
 private:
     [[nodiscard]] WireGestureEndpoint hitTest(QPointF scenePos) const;
@@ -54,13 +65,28 @@ private:
     // gesto) en un WireEndpoint concreto, materializando una derivacion
     // pendiente en un punto de union nuevo (via SplitWireCommand) si hace falta.
     [[nodiscard]] WireEndpoint resolveEndpoint(const WireGestureEndpoint& hit);
-    void cancel();
+    // Envia el/los comando(s) para crear el cable desde el extremo inicial,
+    // pasando por los quiebres ya fijados, hasta `end`. Si `end` esta vacio
+    // (soltar en el vacio), crea un punto de union libre en `endScenePos`
+    // (snappeado) -- la conectividad geometrica decide si ahi toca algo.
+    // Resetea el estado.
+    void commitTo(const WireGestureEndpoint& end, QPointF endScenePos);
+    void updatePreview(QPointF cursorScenePos);
 
     CircuitScene* scene_;
     CircuitDocument* document_;
     QUndoStack* undoStack_;
-    WireGestureEndpoint start_;
-    QGraphicsLineItem* previewLine_ = nullptr;
+
+    // Estado de un trazado en curso. `startHit_` es el extremo inicial (pin/
+    // union/derivacion); `points_` son sus vertices ya fijados en coordenadas
+    // de escena, empezando por el ancla inicial (points_[0]) y siguiendo con
+    // cada quiebre confirmado por clic. En modo arrastre simple points_ queda
+    // con un solo elemento y el cable se cierra al soltar.
+    bool drawing_ = false;
+    WireGestureEndpoint startHit_;
+    std::vector<QPointF> points_;
+    QPointF pressPos_;
+    QGraphicsPathItem* previewPath_ = nullptr;
 };
 
 } // namespace digitalforge::editor
