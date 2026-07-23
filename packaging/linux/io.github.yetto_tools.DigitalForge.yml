@@ -1,0 +1,34 @@
+app-id: io.github.yetto_tools.DigitalForge
+runtime: org.kde.Platform
+runtime-version: '6.11'
+sdk: org.kde.Sdk
+command: DigitalForge
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=home
+
+modules:
+  - name: nlohmann_json
+    buildsystem: cmake
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DJSON_BuildTests=OFF
+    sources:
+      - type: git
+        url: https://github.com/nlohmann/json.git
+        tag: v3.11.3
+
+  - name: digitalforge
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DDIGITALFORGE_BUILD_GUI=ON
+      - -DDIGITALFORGE_BUILD_TESTS=OFF
+      - -DDIGITALFORGE_BUILD_BENCHMARK=OFF
+    sources:
+      - type: dir
+        path: ../..
