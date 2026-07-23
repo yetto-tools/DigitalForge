@@ -7,6 +7,7 @@
 #include <QStyleHints>
 
 #include "IconFactory.hpp"
+#include "Theme.hpp"
 #include "editor/CircuitDocument.hpp"
 
 namespace digitalforge::ui {
@@ -31,6 +32,8 @@ SimulationToolbar::SimulationToolbar(editor::CircuitDocument* document, QWidget*
 
     connect(QApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
             [this](Qt::ColorScheme) { refreshIcons(); });
+    // Forzar un tema cambia la paleta a mano, sin emitir colorSchemeChanged.
+    connect(&ThemeManager::instance(), &ThemeManager::changed, this, [this] { refreshIcons(); });
 
     setDocument(document);
 }
