@@ -1,6 +1,7 @@
 #include "MainWindow.hpp"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDir>
@@ -19,6 +20,7 @@
 #include <QStringList>
 #include <QTabBar>
 #include <QVBoxLayout>
+#include <QFrame>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
@@ -32,10 +34,12 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <QUndoGroup>
+#include <QScreen>
 #include <QUndoStack>
 #include <algorithm>
 #include <stdexcept>
 
+#include "DefaultLayout.hpp"
 #include "editor/CircuitDocument.hpp"
 #include "editor/CircuitScene.hpp"
 #include "editor/CircuitView.hpp"
@@ -50,8 +54,10 @@
 #include "ui/ProjectTree.hpp"
 #include "ui/PropertyInspector.hpp"
 #include "ui/SimulationToolbar.hpp"
+#include "ui/Theme.hpp"
 #include "ui/TruthTablePanel.hpp"
 #include "ui/WaveformPanel.hpp"
+#include "ui/ZoomControl.hpp"
 
 namespace digitalforge::app {
 
@@ -119,6 +125,9 @@ public:
         refreshIcons();
         connect(QApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
                 [this](Qt::ColorScheme) { refreshIcons(); });
+        // Forzar un tema cambia la paleta a mano, lo que NO emite
+        // colorSchemeChanged - ver ui::ThemeManager.
+        connect(&ui::ThemeManager::instance(), &ui::ThemeManager::changed, this, [this] { refreshIcons(); });
 
         // El QLabel no acepta el evento de mouse por si mismo, pero al ser
         // el widget mas al frente bajo el cursor igual se lo queda (Qt
@@ -214,15 +223,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), project_(std::mak
 
     // Recordar tamano/posicion de ventana entre sesiones (ver closeEvent());
     // si todavia no hay nada guardado (primera ejecucion) o restoreGeometry()
-    // rechaza los datos, se usa el tamano por defecto de siempre.
+    // rechaza los datos, se usa el tamano de fabrica centrado en la pantalla.
     const QByteArray savedGeometry = QSettings().value("MainWindow/geometry").toByteArray();
     if (savedGeometry.isEmpty() || !restoreGeometry(savedGeometry)) {
-        resize(1280, 800);
+        applyDefaultWindowGeometry();
     }
 
     setupCentralWidgets();
     setupDocks();
     setupMenusAndToolbars();
+
+    // Despues de que docks Y barras existen: sin ellas creadas, restoreState()
+    // no tiene a quien aplicarle el estado guardado.
+    restoreWindowLayout();
 
     // Un widget permanente sobrevive a las llamadas transitorias a
     // showMessage() usadas en otras partes para confirmar guardado/apertura
@@ -237,7 +250,22 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), project_(std::mak
     // ninguna ventana).
     simulationStateLabel_ = new QLabel(this);
     simulationStateLabel_->setStyleSheet("font-weight: bold; padding: 0 6px;");
+    // Por defecto QStatusBar enmarca cada widget permanente con un relieve
+    // hundido, que con varios widgets seguidos deja la barra llena de cajas.
+    statusBar()->setStyleSheet("QStatusBar::item { border: none; }");
     statusBar()->addPermanentWidget(simulationStateLabel_);
+
+    // Separador fino entre el estado de simulacion y el zoom: son dos bloques
+    // de informacion distintos, igual que las secciones de la barra de Excel.
+    auto* statusSeparator = new QFrame(this);
+    statusSeparator->setFrameShape(QFrame::VLine);
+    statusSeparator->setFrameShadow(QFrame::Sunken);
+    statusSeparator->setFixedHeight(14);
+    statusBar()->addPermanentWidget(statusSeparator);
+
+    // Control de zoom al extremo derecho de la barra de estado, como en Excel.
+    zoomControl_ = new ui::ZoomControl(view_, this);
+    statusBar()->addPermanentWidget(zoomControl_);
 
     setupAutosave();
 
@@ -362,16 +390,10 @@ void MainWindow::setupDocks() {
     makeAutoHideable(truthTableDock_, Qt::RightDockWidgetArea, inspectorDock_);
     makeAutoHideable(waveformDock_, Qt::RightDockWidgetArea, inspectorDock_);
 
-    // Re-aplicar que paneles estaban auto-ocultos al cerrar la sesion
-    // anterior (ver closeEvent()) sobre el layout por defecto de arriba -
-    // por nombre, ya que los punteros de la sesion anterior no existen mas.
-    const QStringList persistedAutoHidden = QSettings().value("MainWindow/autoHiddenDocks").toStringList();
-    for (const QString& name : persistedAutoHidden) {
-        const auto it = autoHideDocksByName_.find(name);
-        if (it != autoHideDocksByName_.end()) {
-            setDockAutoHidden(it->second, true);
-        }
-    }
+    // El auto-hide guardado ya no se aplica aca sino en restoreWindowLayout(),
+    // que corre una vez creadas tambien las barras de herramientas: hay que
+    // llamar a restoreState() antes de sacar paneles del layout, o el estado
+    // restaurado los volveria a anclar.
 
     connect(waveformPanel_, &ui::WaveformPanel::addRequested, this, [this] {
         std::vector<editor::WireEndpoint> endpoints;
@@ -409,6 +431,9 @@ void MainWindow::setupAutoHideStrips() {
     constexpr int kAutoHideStripWidth = 28;
     auto makeStrip = [this](ui::AutoHideStrip*& stripWidget, Qt::ToolBarArea area) {
         auto* bar = new QToolBar(this);
+        // saveState()/restoreState() identifican cada barra y dock por
+        // objectName; sin el, Qt avisa por consola y esa barra no se restaura.
+        bar->setObjectName(area == Qt::LeftToolBarArea ? "leftAutoHideStrip" : "rightAutoHideStrip");
         bar->setMovable(false);
         bar->setFloatable(false);
         bar->setOrientation(Qt::Vertical);
@@ -430,6 +455,64 @@ void MainWindow::makeAutoHideable(QDockWidget* dock, Qt::DockWidgetArea area, QD
     auto* titleBar = qobject_cast<DockTitleBar*>(dock->titleBarWidget());
     connect(titleBar, &DockTitleBar::pinnedChanged, this,
             [this, dock](bool pinned) { setDockAutoHidden(dock, !pinned); });
+}
+
+void MainWindow::applyDefaultWindowGeometry() {
+    resize(defaults::kWindowSize);
+    // La posicion no se hornea junto con el tamano: depende del monitor donde
+    // se haya capturado y en una pantalla mas chica dejaria la ventana fuera
+    // de los limites visibles. Centrarla es estable en cualquier resolucion.
+    if (const QScreen* screen = QApplication::primaryScreen()) {
+        const QRect available = screen->availableGeometry();
+        move(available.center() - QPoint(width() / 2, height() / 2));
+    }
+}
+
+void MainWindow::restoreWindowLayout() {
+    // Disposicion de la sesion anterior; si no hay ninguna guardada o el blob
+    // es ilegible (formato viejo, instalacion nueva), la de fabrica.
+    const QByteArray savedState = QSettings().value("MainWindow/state").toByteArray();
+    QStringList autoHiddenNames;
+    if (!savedState.isEmpty() && restoreState(savedState)) {
+        autoHiddenNames = QSettings().value("MainWindow/autoHiddenDocks").toStringList();
+    } else {
+        const QByteArray defaultState = defaults::windowState();
+        if (!defaultState.isEmpty()) {
+            restoreState(defaultState);
+        }
+        autoHiddenNames = defaults::autoHiddenDocks();
+    }
+
+    // Siempre al final: estos paneles salen del layout, asi que aplicarlos
+    // antes de restoreState() haria que este los volviera a anclar.
+    for (const QString& name : autoHiddenNames) {
+        const auto it = autoHideDocksByName_.find(name);
+        if (it != autoHideDocksByName_.end() && !isAutoHidden(it->second)) {
+            setDockAutoHidden(it->second, true);
+        }
+    }
+}
+
+void MainWindow::resetWindowLayout() {
+    // Devuelve al layout lo que este colapsado antes de restaurar: un dock
+    // removido de la ventana no puede ser reubicado por restoreState(). Se
+    // copia a un vector porque setDockAutoHidden() modifica autoHidden_.
+    const std::vector<QDockWidget*> toRepin(autoHidden_.begin(), autoHidden_.end());
+    for (QDockWidget* dock : toRepin) {
+        setDockAutoHidden(dock, false);
+    }
+
+    const QByteArray defaultState = defaults::windowState();
+    if (!defaultState.isEmpty()) {
+        restoreState(defaultState);
+    }
+    for (const QString& name : defaults::autoHiddenDocks()) {
+        const auto it = autoHideDocksByName_.find(name);
+        if (it != autoHideDocksByName_.end() && !isAutoHidden(it->second)) {
+            setDockAutoHidden(it->second, true);
+        }
+    }
+    applyDefaultWindowGeometry();
 }
 
 void MainWindow::setDockAutoHidden(QDockWidget* dock, bool autoHidden) {
@@ -620,7 +703,8 @@ void MainWindow::setupMenusAndToolbars() {
     // arbol de proyecto (ui::ProjectTree), para quien no lo abra con el
     // clic derecho.
     fileMenu->addAction(tr("&Importar documento..."), this, [this] {
-        const QString path = QFileDialog::getOpenFileName(this, tr("Importar documento"), QString(),
+        const QString path = QFileDialog::getOpenFileName(this, tr("Importar documento"),
+                                                            settings_.ensureWorkspacePath(),
                                                             tr("Documentos DigitalForge (*.dfc)"));
         if (path.isEmpty()) {
             return;
@@ -632,7 +716,8 @@ void MainWindow::setupMenusAndToolbars() {
         }
     });
     fileMenu->addAction(tr("&Exportar documento actual como..."), this, [this] {
-        const QString path = QFileDialog::getSaveFileName(this, tr("Exportar documento como"), QString(),
+        const QString path = QFileDialog::getSaveFileName(this, tr("Exportar documento como"),
+                                                            settings_.ensureWorkspacePath(),
                                                             tr("Documentos DigitalForge (*.dfc)"));
         if (path.isEmpty()) {
             return;
@@ -750,6 +835,29 @@ void MainWindow::setupMenusAndToolbars() {
     gridAction_->setCheckable(true);
     snapAction_ = viewMenu->addAction(tr("Ajustar a cuadricula"));
     snapAction_->setCheckable(true);
+    viewMenu->addSeparator();
+
+    // Tema: tres opciones excluyentes. "Del sistema" devuelve el control al
+    // modo claro/oscuro configurado en el sistema operativo; las otras dos lo
+    // fijan sin importar que use el sistema (ver ui::ThemeManager).
+    QMenu* themeMenu = viewMenu->addMenu(tr("Tema"));
+    auto* themeGroup = new QActionGroup(this);
+    themeGroup->setExclusive(true);
+    const ui::ThemeMode activeTheme = ui::ThemeManager::instance().mode();
+    for (const ui::ThemeMode themeMode : {ui::ThemeMode::System, ui::ThemeMode::Light, ui::ThemeMode::Dark}) {
+        QAction* action = themeMenu->addAction(ui::ThemeManager::displayName(themeMode));
+        action->setCheckable(true);
+        action->setChecked(themeMode == activeTheme);
+        themeGroup->addAction(action);
+        connect(action, &QAction::triggered, this, [this, themeMode] {
+            ui::ThemeManager::instance().setMode(themeMode);
+            settings_.themeMode = ui::ThemeManager::toSettingsValue(themeMode);
+            settings_.save();
+        });
+    }
+
+    viewMenu->addSeparator();
+    viewMenu->addAction(tr("Restablecer disposicion de paneles"), this, &MainWindow::resetWindowLayout);
     bindActiveSceneViewActions();
 
     // --- Bibliotecas ---
@@ -766,6 +874,7 @@ void MainWindow::setupMenusAndToolbars() {
 
     // --- Toolbars ---
     QToolBar* mainToolBar = addToolBar(tr("Principal"));
+    mainToolBar->setObjectName("mainToolBar"); // requerido por saveState(), ver setupAutoHideStrips()
     mainToolBar->addAction(newProjectAction);
     mainToolBar->addAction(newDocumentAction);
     mainToolBar->addAction(openAction);
@@ -778,6 +887,7 @@ void MainWindow::setupMenusAndToolbars() {
     mainToolBar->addAction(icons::zoomOut(), tr("Zoom -"), view_, &CircuitView::zoomOut);
 
     simulationToolbar_ = new ui::SimulationToolbar(project_->activeDocument(), this);
+    simulationToolbar_->setObjectName("simulationToolBar");
     addToolBar(simulationToolbar_);
 }
 
@@ -872,8 +982,11 @@ void MainWindow::onNewProject() {
 }
 
 QString MainWindow::promptForNewProjectPath() {
-    const QString chosen =
-        QFileDialog::getSaveFileName(this, tr("Nuevo proyecto"), QString(), tr("Proyectos DigitalForge (*.dfproj)"));
+    // Arranca en la carpeta de trabajo (creandola si hace falta) en vez de en
+    // el directorio que Qt recuerde por su cuenta: los proyectos nuevos deben
+    // caer juntos en un lugar previsible - ver AppSettings::workspacePath.
+    const QString chosen = QFileDialog::getSaveFileName(this, tr("Nuevo proyecto"), settings_.ensureWorkspacePath(),
+                                                        tr("Proyectos DigitalForge (*.dfproj)"));
     if (chosen.isEmpty()) {
         return QString();
     }
@@ -896,7 +1009,7 @@ void MainWindow::onOpen() {
         return;
     }
     const QString path = QFileDialog::getOpenFileName(
-        this, tr("Abrir proyecto"), QString(),
+        this, tr("Abrir proyecto"), settings_.ensureWorkspacePath(),
         tr("Proyectos y documentos DigitalForge (*.dfproj *.dfc);;Todos los archivos (*)"));
     if (path.isEmpty()) {
         return;
@@ -908,6 +1021,24 @@ void MainWindow::onOpen() {
         addToRecentFiles(path);
         statusBar()->showMessage(tr("Proyecto abierto: %1").arg(path), 3000);
     }
+}
+
+bool MainWindow::openFileAtStartup(const QString& path) {
+    // No pasa por maybeSaveChanges(): esto corre justo despues de construir la
+    // ventana, con el documento anonimo inicial vacio y sin nada que perder.
+    if (path.isEmpty() || !QFileInfo::exists(path)) {
+        statusBar()->showMessage(tr("No se encontro el archivo: %1").arg(path), 5000);
+        return false;
+    }
+    if (!loadFromPath(path)) {
+        return false;
+    }
+    recoveredUnsavedContent_ = false;
+    updateWindowTitle();
+    refreshWindowModified();
+    addToRecentFiles(path);
+    statusBar()->showMessage(tr("Proyecto abierto: %1").arg(path), 3000);
+    return true;
 }
 
 void MainWindow::onSave() {
@@ -1148,8 +1279,20 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         for (QDockWidget* dock : autoHidden_) {
             autoHiddenNames << dock->objectName();
         }
+        // saveState() no puede registrar donde vive un panel que el auto-hide
+        // saco de la ventana (removeDockWidget): se los devuelve al layout
+        // antes de capturar, para que el blob guarde a que area y con que
+        // vecinos volveria cada uno al pinearlo. Cuales quedan colapsados se
+        // sigue guardando aparte, por nombre. Copiado a un vector porque
+        // setDockAutoHidden() modifica autoHidden_ mientras se itera.
+        const std::vector<QDockWidget*> toRepin(autoHidden_.begin(), autoHidden_.end());
+        for (QDockWidget* dock : toRepin) {
+            setDockAutoHidden(dock, false);
+        }
+
         QSettings windowSettings;
         windowSettings.setValue("MainWindow/geometry", saveGeometry());
+        windowSettings.setValue("MainWindow/state", saveState());
         windowSettings.setValue("MainWindow/autoHiddenDocks", autoHiddenNames);
         settings_.save();
 
