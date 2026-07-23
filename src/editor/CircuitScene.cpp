@@ -11,6 +11,7 @@
 #include <cmath>
 #include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "ComponentItem.hpp"
@@ -84,6 +85,11 @@ CircuitScene::CircuitScene(CircuitDocument* document, QUndoStack* undoStack, QOb
     // siguiente evento de pintado natural (mover el mouse, editar, etc.).
     connect(QApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
             [this](Qt::ColorScheme) { update(); });
+
+    // La conectividad geometrica se calcula aca (la vista es la unica que
+    // conoce las coordenadas de escena de los pines) y se entrega al
+    // documento, que la incorpora a su union-find en cada rebuildSimulation().
+    document_->setGeometricConnectionProvider([this] { return computeGeometricConnections(); });
 }
 
 CircuitScene::~CircuitScene() = default;
@@ -96,6 +102,14 @@ void CircuitScene::setMode(EditorMode mode) {
 void CircuitScene::beginPlacement(const std::string& typeId) {
     placementTool_->setPendingType(typeId);
     setMode(EditorMode::Placement);
+}
+
+void CircuitScene::cancelPlacement() {
+    if (mode_ != EditorMode::Placement) {
+        return;
+    }
+    placementTool_->setPendingType({});
+    setMode(EditorMode::Selection);
 }
 
 ComponentItem* CircuitScene::componentItem(uint32_t componentId) const {
@@ -244,6 +258,14 @@ void CircuitScene::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
     if (draggingWireFromSelection_) {
         draggingWireFromSelection_ = false;
         wireTool_->release(event);
+        // El dibujo multi-segmento por clics solo se soporta en modo Wiring
+        // (donde la escena reenvia los movimientos de hover y los clics
+        // sucesivos al WireTool). Iniciado desde un pin en modo Selection, el
+        // gesto es siempre de un solo segmento por arrastre: si quedo abierto
+        // (fue un clic sin arrastre), se cancela aca.
+        if (wireTool_->isDrawing()) {
+            wireTool_->cancel();
+        }
         return;
     }
     switch (mode_) {
@@ -286,6 +308,13 @@ bool CircuitScene::tryToggleInput(QPointF scenePos) {
 }
 
 void CircuitScene::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event) {
+    if (mode_ == EditorMode::Wiring) {
+        // Doble clic cierra el trazado multi-segmento en curso sobre el
+        // destino bajo el cursor (si es valido).
+        wireTool_->finishAt(event->scenePos());
+        event->accept();
+        return;
+    }
     if (mode_ != EditorMode::Selection) {
         QGraphicsScene::mouseDoubleClickEvent(event);
         return;
@@ -304,6 +333,13 @@ void CircuitScene::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event) {
 }
 
 void CircuitScene::contextMenuEvent(QGraphicsSceneContextMenuEvent* event) {
+    // Clic derecho durante un trazado multi-segmento: cancela el gesto en vez
+    // de abrir un menu contextual.
+    if (mode_ == EditorMode::Wiring && wireTool_->isDrawing()) {
+        wireTool_->cancel();
+        event->accept();
+        return;
+    }
     for (QGraphicsItem* hit : items(event->scenePos())) {
         if (auto* component = dynamic_cast<ComponentItem*>(hit)) {
             clearSelection();
@@ -317,6 +353,18 @@ void CircuitScene::contextMenuEvent(QGraphicsSceneContextMenuEvent* event) {
 }
 
 void CircuitScene::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_Escape && wireTool_->isDrawing()) {
+        wireTool_->cancel();
+        event->accept();
+        return;
+    }
+    if (event->key() == Qt::Key_Escape && mode_ == EditorMode::Placement) {
+        // Salida del modo colocacion sin tener que gastar el clic en algun
+        // lugar del lienzo donde no molestara.
+        cancelPlacement();
+        event->accept();
+        return;
+    }
     if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
         deleteSelected();
         event->accept();
@@ -388,34 +436,49 @@ void CircuitScene::deleteSelected() {
         return;
     }
 
-    // Un JunctionItem seleccionado se expande a varios DeleteWireCommand (se
-    // eliminan todos sus cables adjuntos, lo que en cascada lo elimina a el),
-    // asi que el numero real de comandos a apilar no siempre coincide con
-    // selected.size() -- hay que contarlo aparte para decidir si hace falta
-    // envolver todo en un solo macro de undo.
-    std::size_t commandCount = 0;
+    // Todos los IDs se extraen ANTES de ejecutar ningun comando. Borrar un
+    // componente en cascada borra (via CircuitDocument::wireAboutToBeRemoved)
+    // los WireItem de sus cables conectados -- si uno de esos mismos
+    // QGraphicsItem* tambien estaba en `selected` (p.ej. un rubber-band que
+    // agarra un componente y su cable a la vez), seguir iterando `selected`
+    // mientras se ejecutan comandos terminaba leyendo un WireItem ya
+    // liberado (use-after-free: el crash reportado al eliminar varios
+    // elementos juntos). Con los IDs ya copiados aparte, el resto del
+    // proceso nunca vuelve a tocar los QGraphicsItem* originales.
+    std::vector<uint32_t> componentIds;
+    std::vector<uint32_t> wireIds;
     for (QGraphicsItem* item : selected) {
-        if (dynamic_cast<ComponentItem*>(item) != nullptr || dynamic_cast<WireItem*>(item) != nullptr) {
-            commandCount += 1;
+        if (auto* component = dynamic_cast<ComponentItem*>(item)) {
+            componentIds.push_back(component->componentId());
+        } else if (auto* wireItem = dynamic_cast<WireItem*>(item)) {
+            wireIds.push_back(wireItem->wireId());
         } else if (auto* junctionItem = dynamic_cast<JunctionItem*>(item)) {
-            commandCount += document_->wiresAttachedToJunction(junctionItem->junctionId()).size();
+            for (const WireConnection& w : document_->wiresAttachedToJunction(junctionItem->junctionId())) {
+                wireIds.push_back(w.id);
+            }
         }
     }
+    // Un mismo cable puede llegar tanto por seleccion directa como por una
+    // junction seleccionada que lo toca.
+    std::sort(wireIds.begin(), wireIds.end());
+    wireIds.erase(std::unique(wireIds.begin(), wireIds.end()), wireIds.end());
+
+    const std::size_t commandCount = componentIds.size() + wireIds.size();
     if (commandCount == 0) {
         return;
     }
     if (commandCount > 1) {
         undoStack_->beginMacro("Delete selection");
     }
-    for (QGraphicsItem* item : selected) {
-        if (auto* component = dynamic_cast<ComponentItem*>(item)) {
-            undoStack_->push(new DeleteComponentCommand(document_, component->componentId()));
-        } else if (auto* wireItem = dynamic_cast<WireItem*>(item)) {
-            undoStack_->push(new DeleteWireCommand(document_, wireItem->wireId()));
-        } else if (auto* junctionItem = dynamic_cast<JunctionItem*>(item)) {
-            for (const WireConnection& w : document_->wiresAttachedToJunction(junctionItem->junctionId())) {
-                undoStack_->push(new DeleteWireCommand(document_, w.id));
-            }
+    for (uint32_t componentId : componentIds) {
+        undoStack_->push(new DeleteComponentCommand(document_, componentId));
+    }
+    for (uint32_t wireId : wireIds) {
+        // Un componente eliminado arriba puede haber hecho cascada sobre
+        // este mismo cable (ver comentario de arriba) -- se re-verifica por
+        // ID (nunca por puntero) antes de apilar el comando.
+        if (document_->wire(wireId) != nullptr) {
+            undoStack_->push(new DeleteWireCommand(document_, wireId));
         }
     }
     if (commandCount > 1) {
@@ -730,6 +793,9 @@ void CircuitScene::onJunctionPositionChanged(uint32_t junctionId) {
     if (it != junctionItems_.end()) {
         it->second->setPos(document_->junctionPosition(junctionId));
     }
+    // Mover una union puede hacerla coincidir/dejar de coincidir con un pin u
+    // otra union: recalcular la conectividad geometrica.
+    document_->recomputeConnectivity();
 }
 
 void CircuitScene::onPropertyChanged(uint32_t componentId) {
@@ -746,8 +812,63 @@ void CircuitScene::onComponentPlacementChanged(uint32_t componentId) {
     if (it != componentItems_.end()) {
         applyPlacement(it->second, document_->componentPlacement(componentId));
     }
+    // Un movimiento puede hacer que un pin pase a tocar otro pin o el cuerpo
+    // de un cable: recalcular la conectividad geometrica (antes mover era pura
+    // geometria y no afectaba la simulacion).
+    document_->recomputeConnectivity();
 }
 
 void CircuitScene::onSimulationChanged() { update(); }
+
+std::vector<std::pair<WireEndpoint, WireEndpoint>> CircuitScene::computeGeometricConnections() const {
+    struct Point {
+        WireEndpoint ref;
+        QPointF pos;
+    };
+    std::vector<Point> points;
+    for (const auto& [id, item] : componentItems_) {
+        const auto count = static_cast<uint16_t>(item->pinCount());
+        for (uint16_t p = 0; p < count; ++p) {
+            points.push_back({WireEndpoint(PinRef{id, p}), item->pinScenePos(p)});
+        }
+    }
+    for (const auto& [id, item] : junctionItems_) {
+        points.push_back({WireEndpoint::junction(id), item->scenePos()});
+    }
+
+    std::vector<std::pair<WireEndpoint, WireEndpoint>> unions;
+
+    // Coincidencia: dos puntos de conexion en la misma celda de grilla se unen
+    // (pin sobre pin, union sobre pin, union sobre union) aunque no compartan
+    // ningun cable dibujado.
+    const qreal grid = ComponentItem::kGridSize;
+    std::map<std::pair<long long, long long>, WireEndpoint> firstInCell;
+    for (const Point& pt : points) {
+        const std::pair<long long, long long> key{std::llround(pt.pos.x() / grid), std::llround(pt.pos.y() / grid)};
+        const auto [it, inserted] = firstInCell.try_emplace(key, pt.ref);
+        if (!inserted && !(it->second == pt.ref)) {
+            unions.emplace_back(it->second, pt.ref);
+        }
+    }
+
+    // Derivacion en T: un punto que cae sobre el cuerpo (interior) de un cable
+    // del que NO es extremo queda unido a la net de ese cable. Un cruce en 4
+    // vias no entra aca (no hay ningun punto de conexion en el cruce), asi que
+    // dos cables que solo se cruzan siguen electricamente separados.
+    constexpr qreal kOnWireTolerance = 1.5;
+    for (const Point& pt : points) {
+        for (const auto& [wireId, wireItem] : wireItems_) {
+            const WireConnection* w = document_->wire(wireId);
+            if (w == nullptr || w->a == pt.ref || w->b == pt.ref) {
+                continue;
+            }
+            const QPointF projection = wireItem->nearestPointOnPath(pt.pos);
+            if (QLineF(projection, pt.pos).length() <= kOnWireTolerance) {
+                unions.emplace_back(pt.ref, w->a);
+            }
+        }
+    }
+    return unions;
+}
 
 } // namespace digitalforge::editor
