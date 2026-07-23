@@ -1,11 +1,14 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QGraphicsItem>
 #include <QPainterPath>
 
 #include <cstdint>
 #include <vector>
 
+#include "components/ComponentInstance.hpp"
+#include "core/LogicValue.hpp"
 #include "core/Pin.hpp"
 
 namespace digitalforge::editor {
@@ -85,6 +88,12 @@ private:
     void paintHexDisplay(QPainter* painter, bool selected);
     void paintLedMatrix(QPainter* painter, bool selected);
     void paintTerminal(QPainter* painter, bool selected);
+    // Actualiza el brillo retenido de cada celda de una matriz multiplexada
+    // (ver matrixPersistence_). Se llama desde paintLedMatrix().
+    void updateMatrixPersistence(std::size_t rows, std::size_t cols,
+                                  const std::vector<core::LogicValue>& rowValues,
+                                  const std::vector<core::LogicValue>& colValues,
+                                  const components::ComponentInstance& instance);
 
     CircuitDocument* document_;
     uint32_t componentId_;
@@ -107,6 +116,14 @@ private:
     std::vector<QPointF> decorativeRightPositions_;
     std::vector<PinItem*> pinItems_;
     std::vector<WireItem*> attachedWires_;
+    // Solo para io.ledMatrix multiplexada: brillo retenido (0..1) de cada
+    // celda, indexado fila*cols+columna. Imita la persistencia de la vista
+    // frente al barrido fila por fila de un panel real - sin esto solo se
+    // veria encendida la fila que el circuito esta atacando en ese instante.
+    // Es estado puramente visual: no participa de la simulacion ni se guarda.
+    std::vector<qreal> matrixPersistence_;
+    QElapsedTimer matrixPersistenceClock_;
+    qint64 matrixPersistenceLastMs_ = 0;
 };
 
 } // namespace digitalforge::editor
