@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "CircuitDocument.hpp"
@@ -47,6 +48,10 @@ public:
     void setMode(EditorMode mode);
     [[nodiscard]] EditorMode mode() const noexcept { return mode_; }
     void beginPlacement(const std::string& typeId);
+    // Descarta una colocacion pendiente y vuelve a modo Selection. La llama
+    // CircuitView::dropEvent() -el arrastre desde la paleta ya materializo la
+    // intencion del usuario- y la tecla Escape.
+    void cancelPlacement();
 
     [[nodiscard]] ComponentItem* componentItem(uint32_t componentId) const;
     [[nodiscard]] JunctionItem* junctionItem(uint32_t junctionId) const;
@@ -144,6 +149,13 @@ private:
     // true. Usado tanto por el doble clic (modo edicion) como por el clic
     // simple mientras la simulacion esta en ejecucion.
     bool tryToggleInput(QPointF scenePos);
+    // Uniones derivadas de la geometria actual de la escena, entregadas a
+    // CircuitDocument como "provider" (ver setGeometricConnectionProvider):
+    // puntos de conexion (pines/uniones) que coinciden en la misma celda de
+    // grilla, o que caen sobre el cuerpo de un cable del que no son extremo
+    // (derivacion en T). Los cruces en 4 vias no producen union (no hay un
+    // punto de conexion en el cruce), igual que en Logisim.
+    [[nodiscard]] std::vector<std::pair<WireEndpoint, WireEndpoint>> computeGeometricConnections() const;
 
     CircuitDocument* document_;
     QUndoStack* undoStack_;
