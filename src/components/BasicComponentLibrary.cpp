@@ -1666,10 +1666,14 @@ ComponentDefinition makeLedMatrixDefinition() {
     ComponentDefinition definition;
     definition.typeId = "io.ledMatrix";
     definition.displayName = "Matriz LED";
-    definition.description = "Grilla de LEDs con un pin de entrada independiente por celda (sin direccionamiento "
-                              "ni multiplexado).";
+    definition.description = "Grilla de LEDs, con un pin de entrada por celda (conexion directa) o con pines de "
+                              "fila y columna como un panel multiplexado real.";
     definition.category = ComponentCategory::IO;
     definition.properties = {
+        // Con conexion directa el tamano se limita a 8x8 (64 pines ya son
+        // muchos de cablear a mano); multiplexada solo necesita filas+columnas
+        // pines, asi que ahi tienen sentido paneles de hasta 32x32 - el limite
+        // de cada propiedad es el mayor de los dos y derivePins() decide.
         PropertyDescriptor{
             .id = "rows",
             .displayName = "Filas",
@@ -1677,7 +1681,7 @@ ComponentDefinition makeLedMatrixDefinition() {
             .type = PropertyType::UnsignedInteger,
             .defaultValue = uint64_t{8},
             .minValue = uint64_t{1},
-            .maxValue = uint64_t{8},
+            .maxValue = uint64_t{32},
             .enumOptions = {},
             .affectsSimulation = true,
             .affectsAppearance = true,
@@ -1689,15 +1693,31 @@ ComponentDefinition makeLedMatrixDefinition() {
             .type = PropertyType::UnsignedInteger,
             .defaultValue = uint64_t{8},
             .minValue = uint64_t{1},
-            .maxValue = uint64_t{8},
+            .maxValue = uint64_t{32},
             .enumOptions = {},
+            .affectsSimulation = true,
+            .affectsAppearance = true,
+        },
+        PropertyDescriptor{
+            .id = "wiring",
+            .displayName = "Conexion",
+            .description = "\"direct\": un pin de entrada por celda. \"multiplexed\": un pin por fila y uno por "
+                            "columna (filas*columnas celdas con filas+columnas pines), como un panel real - cada "
+                            "LED se enciende cuando su fila esta activa y su columna hunde corriente.",
+            .type = PropertyType::Enum,
+            .defaultValue = std::string("direct"),
+            .minValue = std::nullopt,
+            .maxValue = std::nullopt,
+            .enumOptions = {"direct", "multiplexed"},
             .affectsSimulation = true,
             .affectsAppearance = true,
         },
         PropertyDescriptor{
             .id = "activeHigh",
             .displayName = "Activo en alto",
-            .description = "Si cada LED se enciende con One (marcado) o con Zero (sin marcar).",
+            .description = "Conexion directa: si cada LED se enciende con One (marcado) o con Zero (sin marcar). "
+                            "Multiplexada: el nivel activo de las FILAS; las COLUMNAS son siempre el nivel "
+                            "contrario, que es como funciona un panel real (la fila alimenta, la columna drena).",
             .type = PropertyType::Boolean,
             .defaultValue = true,
             .minValue = std::nullopt,
@@ -1716,9 +1736,27 @@ ComponentDefinition makeLedMatrixDefinition() {
         const auto rows = std::get<uint64_t>(properties.at("rows"));
         const auto cols = std::get<uint64_t>(properties.at("cols"));
         std::vector<PinTemplate> pins;
-        pins.reserve(rows * cols);
-        for (uint64_t r = 0; r < rows; ++r) {
+        if (ledMatrixIsMultiplexed(properties)) {
+            // Filas primero y columnas despues: el indice de pin de la fila r
+            // es r, y el de la columna c es rows + c (ver
+            // ledMatrixMultiplexedCellIsLit y el dibujo en ComponentItem).
+            pins.reserve(rows + cols);
+            for (uint64_t r = 0; r < rows; ++r) {
+                pins.push_back(PinTemplate{"F" + std::to_string(r), core::PinDirection::Input});
+            }
             for (uint64_t c = 0; c < cols; ++c) {
+                pins.push_back(PinTemplate{"C" + std::to_string(c), core::PinDirection::Input});
+            }
+            return pins;
+        }
+        // Conexion directa: el tamano se recorta a 8x8 aunque las propiedades
+        // admitan mas (ver el comentario de rows/cols) - un panel directo de
+        // 32x32 serian 1024 pines.
+        const uint64_t directRows = std::min<uint64_t>(rows, kLedMatrixMaxDirectSide);
+        const uint64_t directCols = std::min<uint64_t>(cols, kLedMatrixMaxDirectSide);
+        pins.reserve(directRows * directCols);
+        for (uint64_t r = 0; r < directRows; ++r) {
+            for (uint64_t c = 0; c < directCols; ++c) {
                 pins.push_back(PinTemplate{"R" + std::to_string(r) + "C" + std::to_string(c),
                                             core::PinDirection::Input});
             }
@@ -2635,6 +2673,23 @@ HexDisplayState hexDisplayState(const ComponentInstance& display, LogicValue bit
     return HexDisplayState{.valid = true, .segments = hexDigitSegments(value)};
 }
 
+bool ledMatrixIsMultiplexed(const PropertyMap& properties) {
+    const auto it = properties.find("wiring");
+    if (it == properties.end()) {
+        return false; // proyecto guardado antes de que existiera la propiedad
+    }
+    const auto* mode = std::get_if<std::string>(&it->second);
+    return mode != nullptr && *mode == "multiplexed";
+}
+
+bool ledMatrixIsMultiplexed(const ComponentInstance& matrix) {
+    if (matrix.typeId() != "io.ledMatrix") {
+        return false;
+    }
+    const auto* mode = std::get_if<std::string>(&matrix.property("wiring"));
+    return mode != nullptr && *mode == "multiplexed";
+}
+
 bool ledMatrixCellIsLit(const ComponentInstance& matrix, LogicValue netValue) {
     if (matrix.typeId() != "io.ledMatrix") {
         throw std::invalid_argument("ledMatrixCellIsLit: instance is not an io.ledMatrix");
@@ -2644,6 +2699,24 @@ bool ledMatrixCellIsLit(const ComponentInstance& matrix, LogicValue netValue) {
     }
     const bool activeHigh = std::get<bool>(matrix.property("activeHigh"));
     return activeHigh ? (netValue == LogicValue::One) : (netValue == LogicValue::Zero);
+}
+
+bool ledMatrixMultiplexedCellIsLit(const ComponentInstance& matrix, LogicValue rowValue, LogicValue colValue) {
+    if (matrix.typeId() != "io.ledMatrix") {
+        throw std::invalid_argument("ledMatrixMultiplexedCellIsLit: instance is not an io.ledMatrix");
+    }
+    const bool cleanLevels = (rowValue == LogicValue::Zero || rowValue == LogicValue::One) &&
+                              (colValue == LogicValue::Zero || colValue == LogicValue::One);
+    if (!cleanLevels) {
+        return false;
+    }
+    // La fila alimenta en su nivel activo y la columna drena en el contrario:
+    // solo esa combinacion cierra el circuito del LED, igual que en el panel
+    // real (por eso alcanza con una unica propiedad de polaridad).
+    const bool activeHigh = std::get<bool>(matrix.property("activeHigh"));
+    const LogicValue rowActive = activeHigh ? LogicValue::One : LogicValue::Zero;
+    const LogicValue colActive = activeHigh ? LogicValue::Zero : LogicValue::One;
+    return rowValue == rowActive && colValue == colActive;
 }
 
 std::optional<char> terminalCharacter(const ComponentInstance& terminal, std::span<const LogicValue> bits) {
