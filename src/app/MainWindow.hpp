@@ -40,6 +40,7 @@ class PropertyInspector;
 class SimulationToolbar;
 class TruthTablePanel;
 class WaveformPanel;
+class ZoomControl;
 } // namespace digitalforge::ui
 
 namespace digitalforge::app {
@@ -62,6 +63,11 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
+
+    // Abre un .dfproj o .dfc indicado al arrancar: doble clic sobre el archivo
+    // en el Explorador (ver las asociaciones que registra el instalador) o
+    // ruta pasada por linea de comandos. Devuelve false si no se pudo leer.
+    bool openFileAtStartup(const QString& path);
 
 private slots:
     void onSceneSelectionChanged();
@@ -110,6 +116,17 @@ protected:
 private:
     void setupCentralWidgets();
     void setupDocks();
+    // Tamano de fabrica, centrado en la pantalla disponible. Se usa cuando no
+    // hay geometria guardada (primera ejecucion) o la guardada es ilegible.
+    void applyDefaultWindowGeometry();
+    // Aplica la disposicion de paneles/barras de la sesion anterior, o la de
+    // fabrica (ver DefaultLayout.hpp) si no hay ninguna. Debe llamarse una vez
+    // creados TODOS los docks y toolbars, y siempre antes de auto-ocultar
+    // paneles: setDockAutoHidden() los saca del layout y restoreState() no
+    // puede colocar un dock que ya no esta en la ventana.
+    void restoreWindowLayout();
+    // Devuelve la ventana a la disposicion de fabrica, descartando la actual.
+    void resetWindowLayout();
     // Arma las dos franjas de auto-hide (izquierda/derecha) que alojan las
     // pestanas verticales de los paneles despineados - ver setupDocks() y
     // makeAutoHideable().
@@ -280,6 +297,7 @@ private:
     AppSettings settings_;
 
     QLabel* simulationStateLabel_ = nullptr;
+    ui::ZoomControl* zoomControl_ = nullptr;
     QAction* gridAction_ = nullptr;
     QAction* snapAction_ = nullptr;
 
