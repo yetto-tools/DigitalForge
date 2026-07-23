@@ -3,6 +3,7 @@
 #include <QPointF>
 #include <QUndoCommand>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -137,7 +138,8 @@ private:
 
 class AddWireCommand : public QUndoCommand {
 public:
-    AddWireCommand(CircuitDocument* document, WireEndpoint a, WireEndpoint b, QUndoCommand* parent = nullptr);
+    AddWireCommand(CircuitDocument* document, WireEndpoint a, WireEndpoint b, std::vector<QPointF> waypoints = {},
+                   QUndoCommand* parent = nullptr);
 
     void redo() override;
     void undo() override;
@@ -149,6 +151,27 @@ private:
     uint32_t wireId_;
     WireEndpoint a_;
     WireEndpoint b_;
+    std::vector<QPointF> waypoints_;
+};
+
+// Crea un punto de union libre (sin cables todavia) en una posicion dada -- se
+// usa para terminar un cable en el vacio (el cable que lo acompana lo lleva a
+// grado 1; la conectividad geometrica decide si ese punto toca algo mas). En
+// undo se elimina solo si quedo sin cables (lo normal, ya que el AddWireCommand
+// que lo acompana en el mismo macro se deshace primero y lo deja en grado 0).
+class AddJunctionCommand : public QUndoCommand {
+public:
+    AddJunctionCommand(CircuitDocument* document, QPointF position, QUndoCommand* parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+    [[nodiscard]] uint32_t junctionId() const noexcept { return junctionId_; }
+
+private:
+    CircuitDocument* document_;
+    uint32_t junctionId_;
+    QPointF position_;
 };
 
 class DeleteWireCommand : public QUndoCommand {
@@ -212,6 +235,28 @@ private:
     uint32_t wireId_;
     std::vector<QPointF> oldWaypoints_;
     std::vector<QPointF> newWaypoints_;
+};
+
+// Reconecta uno de los dos extremos de un cable a un nuevo destino (pin o
+// punto de union) sin borrar el otro extremo -- el mecanismo detras de
+// "agarrar la punta de un cable y llevarla a otro pin". Si al mover el extremo
+// viejo un punto de union queda huerfano, se captura para restaurarlo en
+// undo() (mismo criterio que DeleteWireCommand).
+class RetargetWireEndpointCommand : public QUndoCommand {
+public:
+    RetargetWireEndpointCommand(CircuitDocument* document, uint32_t wireId, bool endIsA, WireEndpoint newEndpoint,
+                                QUndoCommand* parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    CircuitDocument* document_;
+    uint32_t wireId_;
+    bool endIsA_;
+    WireEndpoint oldEndpoint_;
+    WireEndpoint newEndpoint_;
+    std::optional<Junction> orphanedJunction_;
 };
 
 class ChangePropertyCommand : public QUndoCommand {
