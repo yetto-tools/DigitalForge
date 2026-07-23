@@ -15,7 +15,22 @@ namespace digitalforge::ui {
 
 namespace {
 
+// Espacio de coordenadas en el que dibuja cada icono. NO es la resolucion a
+// la que se rasteriza: todas las funciones de abajo siguen trazando sobre una
+// caja de 20x20 y prepareIconPainter() se encarga de la escala.
 constexpr int kSize = 20;
+// Factor de supermuestreo. Los iconos se rasterizan una sola vez a kSize *
+// kRenderScale y de ahi se obtiene cada tamano concreto por REDUCCION suave.
+// Antes se rasterizaba directo a 20x20 y, como las barras de herramientas
+// piden 24x24, Qt tenia que AMPLIAR ese mapa de bits: ampliar interpola y es
+// justamente lo que se veia borroso (defecto reportado).
+constexpr int kRenderScale = 4;
+constexpr int kRenderSize = kSize * kRenderScale;
+// Tamanos que se guardan dentro de cada QIcon. Cubren los que piden las
+// barras (16/24), el arbol de componentes (16/20), los menus y las pantallas
+// con escalado de 150%/200%, de modo que Qt siempre encuentre uno exacto o
+// mayor y nunca tenga que ampliar.
+constexpr int kIconSizes[] = {16, 20, 24, 32, 48, 64};
 constexpr qreal kPi = 3.14159265358979323846;
 
 // Los iconos se renderizan sobre un simple QImage en memoria en lugar de un
@@ -26,9 +41,32 @@ constexpr qreal kPi = 3.14159265358979323846;
 // convierte a QPixmap solo al final, una unica vez, al envolverlo en un
 // QIcon.
 QImage canvas() {
-    QImage img(kSize, kSize, QImage::Format_ARGB32_Premultiplied);
+    QImage img(kRenderSize, kRenderSize, QImage::Format_ARGB32_Premultiplied);
     img.fill(Qt::transparent);
     return img;
+}
+
+// Deja el painter listo para recibir un trazado en coordenadas de kSize sobre
+// el lienzo de kRenderSize: la escala es lo unico que permite que las 19
+// funciones de icono sigan escritas con las mismas coordenadas de siempre.
+void prepareIconPainter(QPainter& painter) {
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter.scale(kRenderScale, kRenderScale);
+}
+
+// Cierra el trazado y arma el QIcon con un mapa de bits nativo por cada
+// tamano de kIconSizes, todos obtenidos por reduccion suave del render de
+// alta resolucion. Que el icono traiga el tamano exacto que se le pide es lo
+// que evita el reescalado borroso de Qt.
+QIcon finishIcon(QPainter& painter, const QImage& img) {
+    painter.end();
+    QIcon icon;
+    for (const int size : kIconSizes) {
+        icon.addPixmap(
+            QPixmap::fromImage(img.scaled(size, size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)));
+    }
+    return icon;
 }
 
 // Ninguna funcion de icono cachea su QIcon - cada llamada vuelve a pintar
@@ -58,6 +96,31 @@ bool isDarkPalette() { return QApplication::palette().color(QPalette::Base).ligh
 // icono.
 QColor inkColor() { return isDarkPalette() ? QColor(225, 225, 225) : QColor(40, 40, 40); }
 QColor paperColor() { return QColor(235, 235, 235); }
+
+// Duplica deliberadamente editor::buildPortShapePath (privado a
+// ComponentItem.cpp) - mismo motivo que otros helpers de pocas lineas
+// duplicados en este archivo: evitar acoplar el icono de paleta al .cpp del
+// item de canvas por una forma tan chica. Usado por wiring.input/output para
+// que el icono realmente se parezca a la silueta que se ve en el lienzo.
+QPainterPath portIconPath(QRectF rect, bool pointsRight) {
+    const qreal tipWidth = rect.height() * 0.4;
+    QPainterPath path;
+    if (pointsRight) {
+        path.moveTo(rect.left(), rect.top());
+        path.lineTo(rect.right() - tipWidth, rect.top());
+        path.lineTo(rect.right(), rect.center().y());
+        path.lineTo(rect.right() - tipWidth, rect.bottom());
+        path.lineTo(rect.left(), rect.bottom());
+    } else {
+        path.moveTo(rect.left(), rect.center().y());
+        path.lineTo(rect.left() + tipWidth, rect.top());
+        path.lineTo(rect.right(), rect.top());
+        path.lineTo(rect.right(), rect.bottom());
+        path.lineTo(rect.left() + tipWidth, rect.bottom());
+    }
+    path.closeSubpath();
+    return path;
+}
 
 // Una flecha circular usada por deshacer/rehacer/reiniciar: un arco mas una
 // pequena punta de flecha triangular en su extremo delantero. `sweepDegrees`
@@ -93,7 +156,7 @@ namespace icons {
 QIcon newDocument() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     QPainterPath path;
     path.moveTo(5, 2);
     path.lineTo(12, 2);
@@ -106,13 +169,13 @@ QIcon newDocument() {
     painter.drawPath(path);
     painter.drawLine(QLineF(12, 2, 12, 6));
     painter.drawLine(QLineF(12, 6, 16, 6));
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon newProject() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     // Mismo contorno de carpeta que open() (un proyecto es una carpeta) -
     // la insignia "+" es lo que distingue "crear una carpeta nueva" de
     // "abrir una ya existente".
@@ -134,13 +197,13 @@ QIcon newProject() {
     painter.setPen(QPen(Qt::white, 1.4));
     painter.drawLine(QLineF(15.5, 13.3, 15.5, 17.7));
     painter.drawLine(QLineF(13.3, 15.5, 17.7, 15.5));
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon open() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     QPainterPath path;
     path.moveTo(2, 6);
     path.lineTo(8, 6);
@@ -152,13 +215,13 @@ QIcon open() {
     painter.setPen(QPen(QColor(120, 90, 20), 1.2));
     painter.setBrush(QColor(250, 210, 120));
     painter.drawPath(path);
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon save() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     painter.setPen(QPen(inkColor(), 1.2));
     painter.setBrush(QColor(70, 80, 100));
     painter.drawRoundedRect(QRectF(3, 3, 14, 14), 2.0, 2.0);
@@ -168,73 +231,73 @@ QIcon save() {
     painter.drawRect(QRectF(12, 4, 2, 3));
     painter.setBrush(paperColor());
     painter.drawRect(QRectF(5, 12, 10, 5));
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon undo() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     drawCircularArrow(painter, 200.0, 220.0);
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon redo() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     drawCircularArrow(painter, -20.0, -220.0);
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon run() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     painter.setPen(Qt::NoPen);
     painter.setBrush(QColor(30, 150, 40));
     QPolygonF triangle;
     triangle << QPointF(5, 3) << QPointF(5, 17) << QPointF(17, 10);
     painter.drawPolygon(triangle);
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon pause() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     painter.setPen(Qt::NoPen);
     painter.setBrush(QColor(160, 120, 20));
     painter.drawRect(QRectF(5, 3, 4, 14));
     painter.drawRect(QRectF(11, 3, 4, 14));
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon step() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     painter.setPen(Qt::NoPen);
     painter.setBrush(QColor(30, 90, 200));
     painter.drawRect(QRectF(3, 3, 3, 14));
     QPolygonF triangle;
     triangle << QPointF(8, 4) << QPointF(8, 16) << QPointF(17, 10);
     painter.drawPolygon(triangle);
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon reset() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     drawCircularArrow(painter, 30.0, 300.0);
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon polarity(bool positiveLogic) {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     if (positiveLogic) {
         painter.setPen(QPen(inkColor(), 1.6));
         painter.setBrush(Qt::NoBrush);
@@ -247,53 +310,53 @@ QIcon polarity(bool positiveLogic) {
         flag << QPointF(5.5, 6) << QPointF(8.5, 3) << QPointF(8.5, 7.5);
         painter.drawPolygon(flag);
     }
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon zoomIn() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     painter.setPen(QPen(inkColor(), 1.6));
     painter.setBrush(Qt::NoBrush);
     painter.drawEllipse(QRectF(2, 2, 11, 11));
     painter.drawLine(QLineF(11, 11, 17, 17));
     painter.drawLine(QLineF(5, 7.5, 10, 7.5));
     painter.drawLine(QLineF(7.5, 5, 7.5, 10));
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon zoomOut() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     painter.setPen(QPen(inkColor(), 1.6));
     painter.setBrush(Qt::NoBrush);
     painter.drawEllipse(QRectF(2, 2, 11, 11));
     painter.drawLine(QLineF(11, 11, 17, 17));
     painter.drawLine(QLineF(5, 7.5, 10, 7.5));
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon deleteItem() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     painter.setPen(QPen(QColor(170, 30, 30), 2.2));
     painter.drawLine(QLineF(5, 5, 15, 15));
     painter.drawLine(QLineF(15, 5, 5, 15));
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon rotate() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     drawCircularArrow(painter, 20.0, 280.0);
     painter.setPen(QPen(inkColor(), 1.2));
     painter.setBrush(paperColor());
     painter.drawRect(QRectF(8, 8, 4, 4));
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 // Estos dos reemplazan los botones nativos de flotar/cerrar de la barra de
@@ -304,24 +367,24 @@ QIcon rotate() {
 QIcon dockFloat() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     painter.setPen(QPen(inkColor(), 1.4));
     painter.setBrush(Qt::NoBrush);
     painter.drawRect(QRectF(4, 7, 10, 9));
     painter.drawLine(QLineF(10, 8, 16, 2));
     painter.drawLine(QLineF(12, 2, 16, 2));
     painter.drawLine(QLineF(16, 2, 16, 6));
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 QIcon dockClose() {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     painter.setPen(QPen(inkColor(), 1.6));
     painter.drawLine(QLineF(6, 6, 14, 14));
     painter.drawLine(QLineF(14, 6, 6, 14));
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 // Chinche de oficina: cabeza achatada (la chapa metalica) + cuerpo que se
@@ -335,7 +398,7 @@ QIcon dockClose() {
 QIcon dockPin(bool pinned) {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     painter.translate(10, 10);
     if (!pinned) {
         painter.rotate(40);
@@ -352,7 +415,7 @@ QIcon dockPin(bool pinned) {
     needle.closeSubpath();
     painter.drawPath(needle);
 
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 } // namespace icons
@@ -360,7 +423,7 @@ QIcon dockPin(bool pinned) {
 QIcon componentIcon(const components::ComponentDefinition& definition) {
     QImage img = canvas();
     QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    prepareIconPainter(painter);
     const std::string& typeId = definition.typeId;
 
     if (typeId.rfind("gates.", 0) == 0) {
@@ -379,10 +442,17 @@ QIcon componentIcon(const components::ComponentDefinition& definition) {
             painter.drawEllipse(QPointF(rect.right() + 2.5, rect.center().y()), 2.5, 2.5);
         }
     } else if (typeId == "wiring.input") {
-        painter.setPen(QPen(inkColor(), 1.4));
-        painter.drawLine(QLineF(2, 10, 12, 10));
+        // Misma silueta apuntando a la derecha que ComponentItem::paintInput
+        // en el lienzo; el cable/pin (punto azul) sale del lado de la punta,
+        // que es donde wiring.input conecta de verdad.
+        const QRectF rect(2, 5, 10, 10);
+        painter.setPen(QPen(inkColor(), 1.2));
+        painter.setBrush(paperColor());
+        painter.drawPath(portIconPath(rect, true));
+        painter.drawLine(QLineF(rect.right(), 10, 16, 10));
+        painter.setPen(Qt::NoPen);
         painter.setBrush(QColor(90, 90, 200));
-        painter.drawEllipse(QPointF(15, 10), 3, 3);
+        painter.drawEllipse(QPointF(16, 10), 2.2, 2.2);
     } else if (typeId == "wiring.clock") {
         // Onda cuadrada (linea escalonada 0-1-0-1, el simbolo universal de
         // reloj en cualquier esquematico/Logisim) rematada con el mismo par
@@ -406,10 +476,18 @@ QIcon componentIcon(const components::ComponentDefinition& definition) {
         painter.setBrush(QColor(90, 90, 200));
         painter.drawEllipse(QPointF(17, 7), 2.2, 2.2);
     } else if (typeId == "wiring.output") {
-        painter.setPen(QPen(inkColor(), 1.4));
+        // Misma silueta que wiring.input (tambien apunta a la derecha, ver
+        // ComponentItem::paintOutput), pero el cable/pin (punto rojo) sale
+        // del lado plano/izquierdo - la punta es puramente decorativa, no es
+        // donde conecta el cable.
+        const QRectF rect(6, 5, 10, 10);
+        painter.setPen(QPen(inkColor(), 1.2));
+        painter.setBrush(paperColor());
+        painter.drawPath(portIconPath(rect, true));
+        painter.drawLine(QLineF(2, 10, rect.left(), 10));
+        painter.setPen(Qt::NoPen);
         painter.setBrush(QColor(200, 90, 90));
-        painter.drawEllipse(QPointF(5, 10), 3, 3);
-        painter.drawLine(QLineF(8, 10, 18, 10));
+        painter.drawEllipse(QPointF(2, 10), 2.2, 2.2);
     } else if (typeId == "wiring.constant") {
         // Una fuente fija se dibuja como un pequeno cuadrado relleno (a
         // diferencia de los circulos usados para los pines de entrada/salida)
@@ -630,7 +708,7 @@ QIcon componentIcon(const components::ComponentDefinition& definition) {
         painter.drawRoundedRect(QRectF(3, 3, 14, 14), 2.0, 2.0);
     }
 
-    return QIcon(QPixmap::fromImage(img));
+    return finishIcon(painter, img);
 }
 
 } // namespace digitalforge::ui
