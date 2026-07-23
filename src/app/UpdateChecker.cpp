@@ -29,17 +29,17 @@ std::array<int, 3> parseVersionCore(const QString& tag) {
     if (core.startsWith('v') || core.startsWith('V')) {
         core.remove(0, 1);
     }
-    const int dash = core.indexOf('-');
+    const qsizetype dash = core.indexOf('-');
     if (dash >= 0) {
         core = core.left(dash);
     }
-    const int plus = core.indexOf('+'); // metadata de build, por si acaso
+    const qsizetype plus = core.indexOf('+'); // metadata de build, por si acaso
     if (plus >= 0) {
         core = core.left(plus);
     }
     std::array<int, 3> out{0, 0, 0};
     const QStringList parts = core.split('.');
-    for (int i = 0; i < parts.size() && i < 3; ++i) {
+    for (qsizetype i = 0; i < parts.size() && i < 3; ++i) {
         out[static_cast<std::size_t>(i)] = parts[i].toInt();
     }
     return out;
