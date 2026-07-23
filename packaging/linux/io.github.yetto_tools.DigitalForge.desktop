@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=DigitalForge
+GenericName=Editor de lógica digital
+Comment=Editor y simulador de circuitos de lógica digital
+Exec=DigitalForge
+Icon=io.github.yetto_tools.DigitalForge
+Categories=Development;Electronics;Engineering;
+Terminal=false
+StartupWMClass=DigitalForge
