@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.yetto_tools.DigitalForge</id>
+  <name>DigitalForge</name>
+  <summary>Editor y simulador de lógica digital multiplataforma</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer_name>Erick Rashón</developer_name>
+  <description>
+    <p>
+      DigitalForge es un editor y simulador de lógica digital con una
+      implementación propia, optimizada para manejar grandes cantidades de
+      compuertas y circuitos integrados.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.yetto_tools.DigitalForge.desktop</launchable>
+  <url type="homepage">https://github.com/yetto-tools/DigitalForge</url>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-07-22" />
+  </releases>
+</component>
