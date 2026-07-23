@@ -1,5 +1,7 @@
 #include "WireRouting.hpp"
 
+#include <QLineF>
+
 #include <algorithm>
 #include <cmath>
 
@@ -85,6 +87,78 @@ QPainterPath buildOrthogonalPath(const std::vector<QPointF>& points, const std::
     path.moveTo(points.front());
     for (std::size_t i = 0; i + 1 < points.size(); ++i) {
         appendElbow(path, points[i], points[i + 1], obstacles);
+    }
+    return path;
+}
+
+std::vector<QPointF> simplifyOrthogonalPolyline(const std::vector<QPointF>& vertices) {
+    if (vertices.size() <= 2) {
+        return vertices;
+    }
+    // 1) Fusiona duplicados consecutivos (o casi).
+    std::vector<QPointF> deduped;
+    for (const QPointF& p : vertices) {
+        if (deduped.empty() || QLineF(deduped.back(), p).length() > kWireAlignTolerance) {
+            deduped.push_back(p);
+        }
+    }
+    if (deduped.size() <= 2) {
+        return deduped;
+    }
+    // 2) Descarta vertices colineales (no son esquinas): un punto cuyo vecino
+    // previo YA CONSERVADO y el siguiente comparten con el la misma x o la
+    // misma y forma un tramo recto, asi que el punto del medio es redundante.
+    std::vector<QPointF> result;
+    result.push_back(deduped.front());
+    for (std::size_t i = 1; i + 1 < deduped.size(); ++i) {
+        const QPointF prev = result.back();
+        const QPointF cur = deduped[i];
+        const QPointF next = deduped[i + 1];
+        const bool collinearHorizontal =
+            std::abs(prev.y() - cur.y()) <= kWireAlignTolerance && std::abs(cur.y() - next.y()) <= kWireAlignTolerance;
+        const bool collinearVertical =
+            std::abs(prev.x() - cur.x()) <= kWireAlignTolerance && std::abs(cur.x() - next.x()) <= kWireAlignTolerance;
+        if (collinearHorizontal || collinearVertical) {
+            continue;
+        }
+        result.push_back(cur);
+    }
+    result.push_back(deduped.back());
+    return result;
+}
+
+std::vector<QPointF> orthogonalVertices(const std::vector<QPointF>& points, const std::vector<QRectF>& obstacles) {
+    if (points.size() < 2) {
+        return points;
+    }
+    std::vector<QPointF> vertices;
+    vertices.push_back(points.front());
+    for (std::size_t i = 0; i + 1 < points.size(); ++i) {
+        appendElbowVertices(vertices, points[i], points[i + 1], obstacles);
+    }
+    return simplifyOrthogonalPolyline(vertices);
+}
+
+QPainterPath buildEditedWirePath(const std::vector<QPointF>& points) {
+    QPainterPath path;
+    if (points.size() < 2) {
+        return path;
+    }
+    path.moveTo(points.front());
+    for (std::size_t i = 0; i + 1 < points.size(); ++i) {
+        const QPointF from = points[i];
+        const QPointF to = points[i + 1];
+        if (std::abs(from.y() - to.y()) <= kWireAlignTolerance) {
+            path.lineTo(to.x(), from.y()); // tramo horizontal (y snapeada a la del origen)
+        } else if (std::abs(from.x() - to.x()) <= kWireAlignTolerance) {
+            path.lineTo(from.x(), to.y()); // tramo vertical
+        } else {
+            // Codo en L simple, horizontal primero: predecible y estable (nunca
+            // se voltea ni salta), a diferencia del codo en Z centrado del
+            // auto-ruteo. Solo puede ocurrir en los stubs a un extremo fijo.
+            path.lineTo(to.x(), from.y());
+            path.lineTo(to);
+        }
     }
     return path;
 }
