@@ -147,6 +147,26 @@ std::size_t WireItem::nearestSegmentInsertIndex(QPointF point, const std::vector
     return insertAt;
 }
 
+std::vector<QPointF> WireItem::renderedCorners() const {
+    std::vector<QPointF> points;
+    points.push_back(endpointScenePos(a_, anchorA_));
+    const std::vector<QPointF> waypoints = storedWaypoints();
+    points.insert(points.end(), waypoints.begin(), waypoints.end());
+    points.push_back(endpointScenePos(b_, anchorB_));
+    return orthogonalVertices(points, obstacleRects());
+}
+
+void WireItem::captureArmOrientations(const std::vector<QPointF>& fullPolyline, std::size_t cornerIndex) {
+    // Un brazo se considera horizontal si sus extremos comparten mas la y que
+    // la x (tras simplifyOrthogonalPolyline cada tramo es axis-aligned, asi que
+    // esto simplemente distingue cual de los dos ejes es el compartido).
+    const QPointF corner = fullPolyline[cornerIndex];
+    const QPointF left = fullPolyline[cornerIndex - 1];
+    const QPointF right = fullPolyline[cornerIndex + 1];
+    leftArmHorizontal_ = std::abs(left.y() - corner.y()) <= std::abs(left.x() - corner.x());
+    rightArmHorizontal_ = std::abs(right.y() - corner.y()) <= std::abs(right.x() - corner.x());
+}
+
 QPointF WireItem::nearestPointOnPath(QPointF scenePos) const {
     const std::vector<QRectF> obstacles = obstacleRects();
     std::vector<QPointF> logicalPoints;
@@ -205,8 +225,16 @@ void WireItem::updateGeometry() {
     points.insert(points.end(), waypoints.begin(), waypoints.end());
     points.push_back(end);
 
-    const std::vector<QRectF> obstacles = obstacleRects();
-    setPath(buildOrthogonalPath(points, obstacles));
+    // Un cable YA EDITADO (con waypoints, sea guardados o en pleno arrastre) se
+    // dibuja con tramos rectos + codo en L simple: su forma la define el
+    // usuario, asi que mover una esquina no debe disparar el re-ruteo en Z ni
+    // el desvio por obstaculos (el defecto reportado). Un cable sin waypoints
+    // sigue con el auto-ruteo que esquiva componentes.
+    if (!waypoints.empty()) {
+        setPath(buildEditedWirePath(points));
+    } else {
+        setPath(buildOrthogonalPath(points, obstacleRects()));
+    }
 }
 
 void WireItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget*) {
@@ -287,12 +315,19 @@ void WireItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
         }
     }
 
-    const std::vector<QPointF> waypoints = storedWaypoints();
-    for (std::size_t i = 0; i < waypoints.size(); ++i) {
-        if (QLineF(event->scenePos(), waypoints[i]).length() <= kVertexHitRadius) {
+    // Cualquier esquina VISIBLE es agarrable, incluidos los codos auto-ruteados
+    // que todavia no son waypoints guardados. Al agarrar una, se "materializan"
+    // todas las esquinas como waypoints reales (dragWaypoints_), de modo que a
+    // partir de ahi el trazado deja de re-rutearse solo y cada esquina se mueve
+    // de forma predecible.
+    const std::vector<QPointF> corners = renderedCorners();
+    for (std::size_t i = 1; i + 1 < corners.size(); ++i) { // solo esquinas interiores (no los extremos)
+        if (QLineF(event->scenePos(), corners[i]).length() <= kVertexHitRadius) {
+            dragWaypoints_.assign(corners.begin() + 1, corners.end() - 1);
+            dragIndex_ = static_cast<int>(i - 1);
+            dragInserted_ = false;
+            captureArmOrientations(corners, i);
             dragging_ = true;
-            dragIndex_ = static_cast<int>(i);
-            dragWaypoints_ = waypoints;
             event->accept();
             return;
         }
@@ -326,20 +361,46 @@ void WireItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
         return;
     }
     if (dragging_) {
-        dragWaypoints_[static_cast<std::size_t>(dragIndex_)] =
-            maybeSnap(qobject_cast<CircuitScene*>(scene()), event->scenePos());
+        const QPointF p = maybeSnap(qobject_cast<CircuitScene*>(scene()), event->scenePos());
+        const std::size_t k = static_cast<std::size_t>(dragIndex_);
+        dragWaypoints_[k] = p;
+        if (!dragInserted_) {
+            // Desliza cada vecino INTERIOR por el eje de su brazo, para que los
+            // dos tramos que se juntan en la esquina sigan en angulo recto
+            // mientras la esquina se mueve. Si el vecino es un extremo fijo
+            // (k==0 o k==ultimo), no se puede mover: ese stub se dibuja como un
+            // codo en L simple (ver buildEditedWirePath).
+            if (k > 0) {
+                if (leftArmHorizontal_) {
+                    dragWaypoints_[k - 1].setY(p.y());
+                } else {
+                    dragWaypoints_[k - 1].setX(p.x());
+                }
+            }
+            if (k + 1 < dragWaypoints_.size()) {
+                if (rightArmHorizontal_) {
+                    dragWaypoints_[k + 1].setY(p.y());
+                } else {
+                    dragWaypoints_[k + 1].setX(p.x());
+                }
+            }
+        }
         updateGeometry();
         return;
     }
     if (pendingInsertAt_.has_value() && QLineF(*pendingInsertAt_, event->scenePos()).length() > kInsertDragThreshold) {
-        // Recien ahora se confirma que es un arrastre real (no un clic
-        // simple): se inserta un unico vertice nuevo en el punto donde
-        // arranco el press y se lo empieza a arrastrar desde ahi.
-        const std::vector<QPointF> waypoints = storedWaypoints();
-        const std::size_t insertAt = nearestSegmentInsertIndex(*pendingInsertAt_, waypoints);
-        dragWaypoints_ = waypoints;
+        // Recien ahora se confirma que es un arrastre real (no un clic simple).
+        // Se materializan las esquinas actuales y se inserta UN vertice nuevo
+        // en el punto del press: asi agregar un desvio no re-rutea el resto del
+        // cable. El vertice recien insertado se mueve libre (dragInserted_), sin
+        // arrastrar a sus vecinos.
+        const std::vector<QPointF> corners = renderedCorners();
+        std::vector<QPointF> materialized(corners.begin() + 1, corners.end() - 1);
+        const std::size_t insertAt = nearestSegmentInsertIndex(*pendingInsertAt_, materialized);
+        dragWaypoints_ = std::move(materialized);
         dragWaypoints_.insert(dragWaypoints_.begin() + static_cast<std::ptrdiff_t>(insertAt), *pendingInsertAt_);
         dragIndex_ = static_cast<int>(insertAt);
+        dragInserted_ = true;
         dragging_ = true;
         pendingInsertAt_.reset();
         updateGeometry();
@@ -393,6 +454,7 @@ void WireItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
         return;
     }
     dragging_ = false;
+    dragInserted_ = false;
     const int draggedIndex = dragIndex_;
     dragIndex_ = -1;
 
