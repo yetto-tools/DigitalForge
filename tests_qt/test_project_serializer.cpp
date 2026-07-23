@@ -8,6 +8,7 @@
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdio>
+#include <vector>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 
@@ -105,6 +106,54 @@ TEST_CASE("Saving an empty project and reloading it yields an empty document", "
 
     CHECK(loaded.componentIds().empty());
     CHECK(loaded.wireIds().empty());
+}
+
+TEST_CASE("A multi-pin chip keeps every wire connected across save and load", "[formats][roundtrip]") {
+    // Reproduce la forma de un proyecto real: tres entradas alimentando un
+    // decodificador BCD de 11 pines, cuyas siete salidas van a un display.
+    // Un componente con muchos pines es donde antes se notaria cualquier
+    // desfase de indices al reconectar los cables.
+    CircuitDocument original;
+    const uint32_t driver = original.addComponent("ic74ls.bcdDriver",
+                                                   {{"variant", PropertyValue{std::string("7448")}}},
+                                                   ComponentPlacement{QPointF(0, 0), 0});
+    const uint32_t display = original.addComponent("io.seven_segment", {}, ComponentPlacement{QPointF(200, 0), 0});
+
+    std::vector<uint32_t> inputs;
+    for (int bit = 0; bit < 4; ++bit) {
+        const uint32_t in = original.addComponent(
+            "wiring.input", {{"initialValue", PropertyValue{std::string(bit == 0 ? "1" : "0")}}},
+            ComponentPlacement{QPointF(-200, bit * 32), 0});
+        inputs.push_back(in);
+        original.addWire(PinRef{in, 0}, PinRef{driver, static_cast<uint16_t>(bit)});
+    }
+    // Salidas a..g del driver (pines 4..10) hacia los segmentos del display.
+    for (uint16_t segment = 0; segment < 7; ++segment) {
+        original.addWire(PinRef{driver, static_cast<uint16_t>(4 + segment)}, PinRef{display, segment});
+    }
+    REQUIRE(original.wireIds().size() == 11);
+
+    // Con BCD = 1 (bit0 en 1) el 7448 enciende solo los segmentos b y c.
+    const LogicValue segmentB = original.pinValue(display, 1);
+    const LogicValue segmentC = original.pinValue(display, 2);
+    const LogicValue segmentA = original.pinValue(display, 0);
+    REQUIRE(segmentB == LogicValue::One);
+    REQUIRE(segmentC == LogicValue::One);
+    REQUIRE(segmentA == LogicValue::Zero);
+
+    formats::saveProjectToFile(original, kRoundTripPath);
+    CircuitDocument loaded;
+    formats::loadProjectFromFile(loaded, kRoundTripPath);
+    std::remove(kRoundTripPath);
+
+    CHECK(loaded.componentIds().size() == 6);
+    CHECK(loaded.wireIds().size() == 11);
+
+    // Lo que importa no es que los cables existan, sino que sigan uniendo los
+    // mismos pines: el display tiene que mostrar exactamente lo mismo.
+    CHECK(loaded.pinValue(display, 0) == segmentA);
+    CHECK(loaded.pinValue(display, 1) == segmentB);
+    CHECK(loaded.pinValue(display, 2) == segmentC);
 }
 
 int main(int argc, char** argv) {
