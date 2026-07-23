@@ -7,6 +7,7 @@
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QWheelEvent>
+#include <algorithm>
 #include <cmath>
 
 #include "CircuitScene.hpp"
@@ -25,9 +26,49 @@ CircuitView::CircuitView(CircuitScene* scene, QWidget* parent) : QGraphicsView(s
     setAcceptDrops(true);
 }
 
-void CircuitView::zoomIn() { scale(1.15, 1.15); }
-void CircuitView::zoomOut() { scale(1.0 / 1.15, 1.0 / 1.15); }
-void CircuitView::resetZoom() { resetTransform(); }
+qreal CircuitView::zoomFactor() const { return transform().m11(); }
+
+namespace {
+// Escala absoluta (no relativa) recortada a los limites: es lo que necesita el
+// control de la barra de estado -el usuario elige el porcentaje, no un
+// incremento- y de paso hace exacto el recorte, que con scale() relativo se
+// podia pasar de largo indefinidamente. Devuelve el factor resultante, o 0 si
+// no hubo cambio.
+qreal applyAbsoluteZoom(QGraphicsView& view, qreal factor, qreal current) {
+    const qreal target = std::clamp(factor, CircuitView::kMinZoom, CircuitView::kMaxZoom);
+    if (current <= 0.0 || qFuzzyCompare(target, current)) {
+        return 0.0;
+    }
+    view.scale(target / current, target / current);
+    return target;
+}
+} // namespace
+
+void CircuitView::zoomIn() { stepZoom(1.15); }
+void CircuitView::zoomOut() { stepZoom(1.0 / 1.15); }
+void CircuitView::resetZoom() { setZoomFactor(1.0); }
+
+void CircuitView::stepZoom(qreal multiplier) {
+    // Conserva el anclaje configurado (AnchorUnderMouse): al usar la rueda el
+    // punto bajo el cursor se queda quieto, que es lo esperable.
+    const qreal applied = applyAbsoluteZoom(*this, zoomFactor() * multiplier, zoomFactor());
+    if (applied > 0.0) {
+        emit zoomChanged(applied);
+    }
+}
+
+void CircuitView::setZoomFactor(qreal factor) {
+    // Ancla al centro de la vista mientras dure el cambio: este camino lo usa
+    // el control de la barra de estado, donde el cursor esta fuera del
+    // viewport y anclar bajo el mouse desplazaria el lienzo de forma arbitraria.
+    const QGraphicsView::ViewportAnchor previousAnchor = transformationAnchor();
+    setTransformationAnchor(QGraphicsView::AnchorViewCenter);
+    const qreal applied = applyAbsoluteZoom(*this, factor, zoomFactor());
+    setTransformationAnchor(previousAnchor);
+    if (applied > 0.0) {
+        emit zoomChanged(applied);
+    }
+}
 
 void CircuitView::wheelEvent(QWheelEvent* event) {
     // Shift+rueda: desplazamiento horizontal. Ctrl+rueda: desplazamiento
@@ -119,6 +160,15 @@ void CircuitView::dropEvent(QDropEvent* event) {
     const QPointF scenePos = mapToScene(event->position().toPoint());
     const ComponentPlacement placement{
         QPointF(std::round(scenePos.x() / grid) * grid, std::round(scenePos.y() / grid) * grid), 0};
+
+    // Antes de colocar: soltar aqui satisface por completo la intencion del
+    // usuario, asi que cualquier colocacion pendiente queda sin efecto. Sin
+    // esto se duplicaba el componente - arrastrar desde la paleta un item que
+    // ya estaba seleccionado hace que el press que inicia el arrastre cuente
+    // ademas como doble clic, y ese doble clic deja armado el PlacementTool;
+    // el primer clic posterior en el lienzo (tipicamente el que se hace para
+    // seleccionar el componente recien soltado) colocaba un segundo ejemplar.
+    circuitScene->cancelPlacement();
 
     auto* command = new PlaceComponentCommand(circuitScene->document(), typeId, {}, placement);
     circuitScene->undoStack()->push(command);
