@@ -6,9 +6,12 @@ cantidades de compuertas y circuitos integrados.
 
 ## Estado del proyecto
 
-**Fase 1 completa: núcleo de simulación sin interfaz gráfica.**
+Versión actual: **0.1.0** (pre-alpha). El núcleo de simulación y el editor
+gráfico Qt6 funcionan de extremo a extremo: se puede colocar componentes,
+cablearlos, simular y guardar/abrir proyectos.
 
-Implementado:
+### Núcleo de simulación
+
 - Valores lógicos de cinco estados (`0`, `1`, `Z`, `X`, `Error`) con las
   operaciones NOT/AND/OR/NAND/NOR/XOR/XNOR.
 - Representación compacta de compuertas y redes (`std::vector` + índices,
@@ -17,19 +20,59 @@ Implementado:
   runUntilStable/setInput/getNetValue`.
 - Protección contra oscilaciones infinitas, eventos repetidos y conflictos
   entre múltiples salidas.
-- Suite de pruebas (Catch2) y benchmark headless hasta 1,000,000 de compuertas.
+- Compila sin Qt (`core` y `components` son independientes de la GUI).
 
-Pendiente (fases siguientes): interfaz gráfica Qt6, bibliotecas JSON (básica
-y 74LSxx), guardado/carga de proyectos, subcircuitos, sondas y optimizaciones
-adicionales de memoria/renderizado.
+### Editor gráfico (Qt6)
+
+- Lienzo de edición con colocación, cableado ortogonal con ruteo automático
+  (`WireRouting`), uniones, selección, arrastre y ajuste a la rejilla.
+- Deshacer/rehacer para todas las operaciones de edición (`UndoCommands`).
+- Simulación interactiva con visualización de estados lógicos por color,
+  barra de herramientas de simulación, tabla de verdad y registro de formas
+  de onda.
+- Paneles acoplables: paleta de componentes, árbol de proyecto, inspector de
+  propiedades, minimapa; disposición por defecto restaurable.
+- Control de zoom (10%–400%) en la barra de estado, selector de tema
+  (del sistema / claro / oscuro), iconos nítidos generados por código.
+- Carpeta de trabajo configurable y asociación de archivos `.dfproj`/`.dfc`.
+
+### Biblioteca de componentes integrada (~40 tipos)
+
+- Compuertas básicas y buffers/inversores triestado.
+- Multiplexores, decodificadores, codificadores de prioridad.
+- Aritmética: sumador, restador, comparador.
+- Memoria: latch SR, flip-flops D y JK, registro.
+- Cableado: entrada, salida, reloj, constante, túnel, tierra, resistencias de
+  pull, transistores, compuerta de transmisión, etc.
+- E/S: LED, display hexadecimal, matriz LED (directa y multiplexada),
+  terminal; sonda de depuración; subcircuitos.
+
+### Persistencia, formatos y compatibilidad
+
+- Proyectos en JSON (`.dfproj` / `.dfc`) con `ProjectSerializer` y manifiesto.
+- Importador de circuitos de Logisim (`LogisimImporter`).
+- SHA-256 propio (`core::Sha256`) y huellas de componentes
+  (`ComponentFingerprints`) para detectar cambios de interfaz, comportamiento
+  o apariencia.
+- Archivo de bloqueo `digitalforge.lock.json` junto al proyecto y reporte de
+  compatibilidad al abrir. Ver [docs/dfml-metadata-status.md](docs/dfml-metadata-status.md).
+- Versionado semántico de la app y versiones de esquema independientes por
+  formato (`FormatVersions.hpp`).
+
+### Empaquetado
+
+- Instalador de Windows (Inno Setup) y Flatpak de Linux (ver más abajo).
 
 ## Limitaciones actuales
 
-- No hay interfaz gráfica todavía (Fase 2).
-- No hay carga de componentes desde JSON todavía (Fase 3).
-- No hay persistencia de proyectos todavía (Fase 4).
-- Los buses de múltiples bits, subcircuitos y retardos de propagación
-  configurables aún no están implementados.
+- Las bibliotecas de componentes son código C++ integrado; el lenguaje DFML,
+  su compilador (DFMC) y los paquetes externos (DFLIB) aún no existen.
+- La metadata desconocida no crítica se pierde al reguardar (criterio 29) y el
+  reporte de compatibilidad todavía no se muestra en la interfaz (criterio 30).
+- Los buses de múltiples bits y los retardos de propagación configurables aún
+  no están implementados.
+- Reordenar los pines de una definición ya colocada aún reconecta mal en
+  caliente (la reconexión por clave solo protege la carga de proyectos).
 
 ## Dependencias
 
@@ -51,6 +94,26 @@ Con el generador MinGW Makefiles (usado durante el desarrollo de la Fase 1),
 los ejecutables quedan en `build\tests\` y `build\benchmark\` en lugar de
 `build\Release\`.
 
+## Compilación de la GUI (Windows)
+
+Requiere Qt 6.5+ (mingw_64) y el MinGW que viene con ese kit de Qt (deben
+coincidir, o el `.exe` falla al arrancar por DLLs de runtime desajustadas -
+ver mas abajo). Ejemplo con Qt 6.7.3 mingw_64:
+
+```powershell
+$env:PATH = "C:\Qt\6.7.3\mingw_64\bin;C:\Qt\Tools\mingw1310_64\bin;$env:PATH"
+cmake -S . -B build-gui -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DDIGITALFORGE_BUILD_GUI=ON
+cmake --build build-gui --target DigitalForge -j
+```
+
+El ejecutable queda en `build-gui\src\app\DigitalForge.exe`. Si no arranca por
+falta de DLLs, hace falta copiar junto al `.exe` (o tener en el PATH de esa
+sesion) `Qt6Core.dll`/`Qt6Gui.dll`/`Qt6Widgets.dll` (de
+`C:\Qt\6.7.3\mingw_64\bin`), `libstdc++-6.dll`/`libgcc_s_seh-1.dll`/
+`libwinpthread-1.dll` (del mismo MinGW que compilo el proyecto) y
+`platforms\qwindows.dll` - `windeployqt` automatiza esto (ver la seccion de
+instalador de Windows mas abajo).
+
 ## Compilación en Linux
 
 ```bash
@@ -60,11 +123,40 @@ ctest --test-dir build --output-on-failure
 ./build/benchmark/digitalforge_benchmark
 ```
 
+## Generar instalador de Windows
+
+Requiere tener [Inno Setup 6](https://jrsoftware.org/isdl.php) instalado.
+El script compila la GUI en modo `Release`, corre `windeployqt` para reunir
+las DLLs de Qt y del runtime de MinGW, y empaqueta todo con Inno Setup:
+
+```powershell
+powershell -File packaging\windows\build_installer.ps1
+```
+
+El instalador queda en `packaging\windows\output\DigitalForge-Setup-<version>.exe`.
+
+## Generar Flatpak de Linux
+
+Requiere `flatpak` y `flatpak-builder` instalados, y el remoto Flathub
+agregado (`flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`).
+Desde la raíz del repo:
+
+```bash
+flatpak-builder --user --install --force-clean \
+    packaging/linux/build-dir \
+    packaging/linux/io.github.yetto_tools.DigitalForge.yml
+flatpak run io.github.yetto_tools.DigitalForge
+```
+
 ## Pruebas
 
 El núcleo se prueba con Catch2 (`tests/`), cubriendo tablas de verdad,
 propagación de `Unknown`/`HighImpedance`, detección de conflictos, orden de
-eventos, circuitos combinacionales y detección de oscilaciones.
+eventos, circuitos combinacionales, detección de oscilaciones, huellas de
+componentes y ruteo de cables. El editor y los formatos tienen una suite Qt
+aparte (`tests_qt/`: documento de circuito, serializador de proyecto, archivo
+de bloqueo, compatibilidad y ruteo), que se compila solo con
+`DIGITALFORGE_BUILD_GUI=ON`.
 
 ```bash
 ctest --test-dir build --output-on-failure
@@ -80,6 +172,9 @@ estimación de memoria.
 
 ## Formato de bibliotecas
 
-A partir de la Fase 3, los componentes combinacionales simples y los
-circuitos integrados 74LSxx se definirán mediante archivos JSON (ver
-`docs/component-format.md`, pendiente de esa fase).
+Hoy los componentes se definen como `ComponentDefinition` en C++
+(`src/components/BasicComponentLibrary.cpp`) y se registran en un
+`ComponentRegistry` en memoria. A futuro se definirán mediante el lenguaje
+DFML y se empaquetarán como bibliotecas externas (DFLIB); la capa de metadata
+y compatibilidad ya está preparada para ese modelo (ver
+[docs/dfml-metadata-status.md](docs/dfml-metadata-status.md)).
