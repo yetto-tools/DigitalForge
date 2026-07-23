@@ -1,8 +1,12 @@
 #include "CircuitDocument.hpp"
 
+#include <QCoreApplication>
+#include <QDir>
+#include <QString>
 #include <QTimer>
 
 #include <algorithm>
+#include <filesystem>
 #include <stdexcept>
 #include <utility>
 
@@ -11,6 +15,24 @@
 namespace digitalforge::editor {
 
 namespace {
+
+// Directorio del que se cargan los componentes definidos en JSON al construir
+// un documento. Prioridad: la variable de entorno DIGITALFORGE_COMPONENTS_DIR
+// (para desarrollo/tests), y si no, la carpeta "components" junto al
+// ejecutable (donde el instalador deja la biblioteca). Vacio (-> no se carga
+// nada) si no hay ninguna de las dos, por ejemplo en un test que construye el
+// documento sin una QCoreApplication.
+std::filesystem::path resolveComponentsDirectory() {
+    const QString override = qEnvironmentVariable("DIGITALFORGE_COMPONENTS_DIR");
+    if (!override.isEmpty()) {
+        return std::filesystem::path(override.toStdString());
+    }
+    if (QCoreApplication::instance() != nullptr) {
+        const QString beside = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("components"));
+        return std::filesystem::path(beside.toStdString());
+    }
+    return {};
+}
 
 WireEndpoint dsuFind(std::map<WireEndpoint, WireEndpoint>& parent, WireEndpoint x) {
     WireEndpoint& p = parent.at(x);
@@ -34,6 +56,14 @@ void dsuUnion(std::map<WireEndpoint, WireEndpoint>& parent, WireEndpoint a, Wire
 
 CircuitDocument::CircuitDocument(QObject* parent) : QObject(parent) {
     components::registerBasicComponentLibrary(registry_);
+    // Componentes definidos en JSON (formato por netlist, ver
+    // components/JsonComponentLoader): se cargan encima de la biblioteca
+    // integrada. Un archivo malformado no aborta la construccion -- queda
+    // registrado en componentLibraryReport_ para que la interfaz lo muestre.
+    const std::filesystem::path componentsDir = resolveComponentsDirectory();
+    if (!componentsDir.empty()) {
+        componentLibraryReport_ = components::loadComponentLibraryFromDirectory(registry_, componentsDir);
+    }
     rebuildSimulation();
 }
 
