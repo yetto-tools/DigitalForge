@@ -8,6 +8,7 @@ add_executable(DigitalForge WIN32
     MainWindow.cpp
     AppSettings.cpp
     DefaultLayout.cpp
+    UpdateChecker.cpp
     ${CMAKE_SOURCE_DIR}/resources/app.qrc
     ${DIGITALFORGE_APP_PLATFORM_SOURCES}
     ${CMAKE_SOURCE_DIR}/src/editor/CircuitDocument.cpp
@@ -43,7 +44,7 @@ add_executable(DigitalForge WIN32
     ${CMAKE_SOURCE_DIR}/src/formats/LogisimImporter.cpp
 )
 
-target_link_libraries(DigitalForge PRIVATE digitalforge_components Qt6::Widgets)
+target_link_libraries(DigitalForge PRIVATE digitalforge_components Qt6::Widgets Qt6::Network)
 
 if(UNIX AND NOT APPLE)
     include(GNUInstallDirs)
