@@ -7,6 +7,7 @@ add_executable(digitalforge_tests
     test_simulator.cpp
     test_components.cpp
     test_fingerprints.cpp
+    test_json_component_loader.cpp
 )
 target_link_libraries(digitalforge_tests PRIVATE digitalforge_core digitalforge_components Catch2::Catch2WithMain)
 
