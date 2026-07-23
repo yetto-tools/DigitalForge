@@ -83,9 +83,12 @@ void SimulationToolbar::onTogglePolarity(bool positive) {
 void SimulationToolbar::updatePolarityActionAppearance(bool positive) {
     polarityAction_->setIcon(icons::polarity(positive));
     polarityAction_->setText(positive ? tr("Logica positiva") : tr("Logica negativa"));
-    polarityAction_->setToolTip(positive
-                                     ? tr("Logica positiva: las entradas en Z se resuelven a 0 al iniciar la simulacion")
-                                     : tr("Logica negativa: las entradas en Z se resuelven a 1 al iniciar la simulacion"));
+    polarityAction_->setToolTip(
+        positive
+            ? tr("Logica positiva: voltaje alto = 1, voltaje bajo = 0. "
+                 "Una entrada flotante (Z) se resuelve a 0 al iniciar la simulacion.")
+            : tr("Logica negativa: voltaje alto = 0, voltaje bajo = 1. "
+                 "Una entrada flotante (Z) se resuelve a 1 al iniciar la simulacion."));
 }
 
 void SimulationToolbar::refreshIcons() {
