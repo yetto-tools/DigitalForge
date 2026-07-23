@@ -17,6 +17,7 @@ class QTimer;
 #include "components/ComponentInstance.hpp"
 #include "components/ComponentRegistry.hpp"
 #include "components/ExternalDocumentView.hpp"
+#include "components/JsonComponentLoader.hpp"
 #include "core/Circuit.hpp"
 #include "core/Simulator.hpp"
 
@@ -138,6 +139,14 @@ public:
     explicit CircuitDocument(QObject* parent = nullptr);
 
     [[nodiscard]] const components::ComponentRegistry& registry() const noexcept { return registry_; }
+
+    // Resultado de cargar la biblioteca de componentes desde JSON al construir
+    // el documento (typeIds cargados y errores por archivo). Vacio si no habia
+    // directorio de componentes. Pensado para que la interfaz pueda avisar de
+    // un componente que no cargo, en vez de fallar en silencio.
+    [[nodiscard]] const components::ComponentLoadReport& componentLibraryReport() const noexcept {
+        return componentLibraryReport_;
+    }
 
     // Lanza std::invalid_argument si typeId es desconocido o los overrides son invalidos.
     uint32_t addComponent(const std::string& typeId, components::PropertyMap overrides = {},
@@ -368,6 +377,7 @@ private:
     void validateSubcircuitTarget(const std::string& targetPath) const;
 
     components::ComponentRegistry registry_;
+    components::ComponentLoadReport componentLibraryReport_;
     std::map<uint32_t, std::unique_ptr<components::ComponentInstance>> components_;
     std::map<uint32_t, ComponentPlacement> placements_;
     std::map<uint32_t, WireConnection> wires_;
