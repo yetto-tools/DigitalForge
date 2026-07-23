@@ -3,10 +3,11 @@ if(WIN32)
     list(APPEND DIGITALFORGE_APP_PLATFORM_SOURCES ${CMAKE_SOURCE_DIR}/resources/app.rc)
 endif()
 
-add_executable(DigitalForge
+add_executable(DigitalForge WIN32
     main.cpp
     MainWindow.cpp
     AppSettings.cpp
+    DefaultLayout.cpp
     ${CMAKE_SOURCE_DIR}/resources/app.qrc
     ${DIGITALFORGE_APP_PLATFORM_SOURCES}
     ${CMAKE_SOURCE_DIR}/src/editor/CircuitDocument.cpp
@@ -18,6 +19,7 @@ add_executable(DigitalForge
     ${CMAKE_SOURCE_DIR}/src/editor/JunctionItem.cpp
     ${CMAKE_SOURCE_DIR}/src/editor/SelectionTool.cpp
     ${CMAKE_SOURCE_DIR}/src/editor/WireTool.cpp
+    ${CMAKE_SOURCE_DIR}/src/editor/WireRouting.cpp
     ${CMAKE_SOURCE_DIR}/src/editor/PlacementTool.cpp
     ${CMAKE_SOURCE_DIR}/src/editor/CircuitScene.cpp
     ${CMAKE_SOURCE_DIR}/src/editor/CircuitView.cpp
@@ -33,9 +35,32 @@ add_executable(DigitalForge
     ${CMAKE_SOURCE_DIR}/src/ui/IconFactory.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/PreferencesDialog.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/MiniMapView.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/ZoomControl.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/Theme.cpp
     ${CMAKE_SOURCE_DIR}/src/formats/ProjectManifestSerializer.cpp
     ${CMAKE_SOURCE_DIR}/src/formats/ProjectSerializer.cpp
+    ${CMAKE_SOURCE_DIR}/src/formats/LockFile.cpp
     ${CMAKE_SOURCE_DIR}/src/formats/LogisimImporter.cpp
 )
 
 target_link_libraries(DigitalForge PRIVATE digitalforge_components Qt6::Widgets)
+
+if(UNIX AND NOT APPLE)
+    include(GNUInstallDirs)
+
+    set(DIGITALFORGE_APP_ID "io.github.yetto_tools.DigitalForge")
+
+    install(TARGETS DigitalForge RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    install(FILES ${CMAKE_SOURCE_DIR}/packaging/linux/${DIGITALFORGE_APP_ID}.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+
+    install(FILES ${CMAKE_SOURCE_DIR}/packaging/linux/${DIGITALFORGE_APP_ID}.metainfo.xml
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
+
+    foreach(DIGITALFORGE_ICON_SIZE 16 32 48 128 256)
+        install(FILES ${CMAKE_SOURCE_DIR}/resources/app_${DIGITALFORGE_ICON_SIZE}.png
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${DIGITALFORGE_ICON_SIZE}x${DIGITALFORGE_ICON_SIZE}/apps
+            RENAME ${DIGITALFORGE_APP_ID}.png)
+    endforeach()
+endif()
