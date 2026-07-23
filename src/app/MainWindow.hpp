@@ -45,6 +45,8 @@ class ZoomControl;
 
 namespace digitalforge::app {
 
+class UpdateChecker;
+
 // Compartido entre MainWindow::onAbout() y main.cpp (splash de inicio) -
 // unico lugar donde cambiar la version mostrada al usuario.
 inline constexpr const char* kAppVersion = "0.1.0 PRE-ALPHA";
@@ -86,6 +88,13 @@ private slots:
     void onActiveDocumentChanged(uint32_t id);
     void onDocumentRenamed(uint32_t id);
     void onAbout();
+    // Chequeo manual de actualizaciones (menu Ayuda): a diferencia del
+    // automatico al arrancar, este si avisa cuando ya estas al dia o cuando
+    // falla la comprobacion.
+    void onCheckForUpdatesManually();
+    // Aviso (comun al chequeo manual y al automatico) de que hay una version
+    // mas nueva publicada, con opcion de abrir la pagina de descargas.
+    void onUpdateAvailable(const QString& latestVersion, const QString& downloadUrl);
     // Pestanas de documento (estilo Visual Studio) arriba del lienzo - ver
     // documentTabBar_. Cerrar una pestana no quita el documento del
     // proyecto (eso lo sigue haciendo unicamente ui::ProjectTree): solo dejo
@@ -295,6 +304,8 @@ private:
     // Preferencias persistidas (ver AppSettings.hpp) - cargadas una vez al
     // construir la ventana y reescritas en closeEvent()/onPreferences().
     AppSettings settings_;
+
+    UpdateChecker* updateChecker_ = nullptr;
 
     QLabel* simulationStateLabel_ = nullptr;
     ui::ZoomControl* zoomControl_ = nullptr;
