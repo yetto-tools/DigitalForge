@@ -1,0 +1,156 @@
+# Compila DigitalForge para Windows y Linux y publica un release (prerelease)
+# en GitHub con los binarios adjuntos, cada vez que se empuja un tag "v*"
+# (por ejemplo v0.1.0-alpha).
+#
+# - Windows: instalador de Inno Setup (DigitalForge-Setup-<version>.exe),
+#   compilado con MinGW + Qt, igual que packaging/windows/build_installer.ps1.
+# - Linux: un AppImage autocontenido (DigitalForge-<tag>-x86_64.AppImage).
+#
+# Nota: la primera corrida de un workflow que compila Qt en CI suele necesitar
+# algun ajuste menor (version exacta de Qt, id del toolchain MinGW). Revisar la
+# pestana Actions del repositorio si algun paso falla.
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # necesario para que el job "release" cree el release y suba archivos
+
+jobs:
+  # -------------------------------------------------------------------------
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Qt (mingw) + toolchain MinGW
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.3'
+          host: windows
+          target: desktop
+          arch: win64_mingw
+          tools: 'tools_mingw1310'
+
+      - name: Calcular version numerica desde el tag
+        id: ver
+        shell: bash
+        run: |
+          # v0.1.0-alpha -> 0.1.0 (Inno Setup exige MAJOR.MINOR.PATCH numerico)
+          tag="${GITHUB_REF_NAME}"
+          num="${tag#v}"
+          num="${num%%-*}"
+          echo "version=$num" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Instalar Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Compilar DigitalForge.exe
+        shell: pwsh
+        run: |
+          $mingwBin = Join-Path $env:GITHUB_WORKSPACE "Qt\Tools\mingw1310_64\bin"
+          $env:PATH = "$mingwBin;$env:PATH"
+          cmake -S . -B build-gui -G "MinGW Makefiles" `
+            -DCMAKE_BUILD_TYPE=Release -DDIGITALFORGE_BUILD_GUI=ON `
+            -DDIGITALFORGE_BUILD_TESTS=OFF -DDIGITALFORGE_BUILD_BENCHMARK=OFF `
+            -DCMAKE_C_COMPILER="$mingwBin\gcc.exe" -DCMAKE_CXX_COMPILER="$mingwBin\g++.exe"
+          cmake --build build-gui --target DigitalForge -j
+
+      - name: Empaquetar (windeployqt + Inno Setup)
+        shell: pwsh
+        run: |
+          $mingwBin = Join-Path $env:GITHUB_WORKSPACE "Qt\Tools\mingw1310_64\bin"
+          $dist = "packaging\windows\dist\DigitalForge"
+          New-Item -ItemType Directory -Path $dist -Force | Out-Null
+          Copy-Item "build-gui\src\app\DigitalForge.exe" $dist
+          windeployqt --release --compiler-runtime (Join-Path $dist "DigitalForge.exe")
+          # Igual que build_installer.ps1: garantizar el runtime del MinGW que compilo.
+          foreach ($dll in @("libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll")) {
+            Copy-Item (Join-Path $mingwBin $dll) $dist -Force
+          }
+          # Componentes JSON (Fase 3): viajan junto al ejecutable.
+          if (Test-Path "components") { Copy-Item "components" (Join-Path $dist "components") -Recurse -Force }
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "/DMyAppVersion=${{ steps.ver.outputs.version }}" "packaging\windows\DigitalForge.iss"
+
+      - name: Subir instalador como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: packaging/windows/output/*.exe
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencias del sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libfuse2 libgl1-mesa-dev
+
+      - name: Instalar Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.3'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+
+      - name: Version desde el tag
+        id: ver
+        run: echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Compilar e instalar en AppDir
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DDIGITALFORGE_BUILD_GUI=ON \
+            -DDIGITALFORGE_BUILD_TESTS=OFF -DDIGITALFORGE_BUILD_BENCHMARK=OFF
+          cmake --build build --target DigitalForge -j
+          DESTDIR="$PWD/AppDir" cmake --install build --prefix /usr
+          # Componentes JSON (Fase 3): junto al ejecutable dentro del AppImage.
+          mkdir -p AppDir/usr/bin/components
+          cp components/*.json AppDir/usr/bin/components/ || true
+
+      - name: Construir el AppImage con linuxdeploy
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy*.AppImage
+          export QMAKE="$(which qmake6 || which qmake)"
+          export OUTPUT="DigitalForge-${{ steps.ver.outputs.tag }}-x86_64.AppImage"
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage
+          # linuxdeploy nombra el archivo segun el .desktop; se renombra al esquema del release.
+          mv DigitalForge*.AppImage "$OUTPUT" 2>/dev/null || mv ./*.AppImage "$OUTPUT"
+
+      - name: Subir AppImage como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: DigitalForge-*.AppImage
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  release:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar artefactos
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publicar el prerelease con los binarios
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          generate_release_notes: true
+          name: "DigitalForge ${{ github.ref_name }}"
+          files: |
+            artifacts/windows-installer/*.exe
+            artifacts/linux-appimage/*.AppImage
