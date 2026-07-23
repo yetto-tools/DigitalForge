@@ -12,9 +12,12 @@
 
 using digitalforge::editor::appendElbow;
 using digitalforge::editor::appendElbowVertices;
+using digitalforge::editor::buildEditedWirePath;
 using digitalforge::editor::buildOrthogonalPath;
 using digitalforge::editor::chooseClearMidX;
 using digitalforge::editor::kWireAlignTolerance;
+using digitalforge::editor::orthogonalVertices;
+using digitalforge::editor::simplifyOrthogonalPolyline;
 using digitalforge::editor::verticalSegmentCrosses;
 
 namespace {
@@ -217,4 +220,64 @@ TEST_CASE("Routing clears the obstacle on its vertical run, not on the horizonta
     // porque va a y=0 desde x=0 hasta la columna elegida (232), atravesando
     // la franja x 180..220 del rectangulo.
     CHECK(path.intersects(blocker));
+}
+
+namespace {
+bool anySegmentDiagonal(const std::vector<QPointF>& vertices) {
+    for (std::size_t i = 0; i + 1 < vertices.size(); ++i) {
+        const bool aligned = std::abs(vertices[i].x() - vertices[i + 1].x()) <= kWireAlignTolerance ||
+                             std::abs(vertices[i].y() - vertices[i + 1].y()) <= kWireAlignTolerance;
+        if (!aligned) {
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace
+
+TEST_CASE("simplifyOrthogonalPolyline drops duplicates and collinear points", "[editor][wireRouting]") {
+    // Duplicado consecutivo + tres puntos colineales horizontales en el medio.
+    const std::vector<QPointF> raw{
+        {0.0, 0.0}, {0.0, 0.0}, {50.0, 0.0}, {100.0, 0.0}, {100.0, 80.0},
+    };
+    const std::vector<QPointF> simplified = simplifyOrthogonalPolyline(raw);
+    // El duplicado inicial y el punto colineal (50,0) desaparecen; queda la
+    // esquina real en (100,0).
+    REQUIRE(simplified.size() == 3);
+    CHECK(simplified.front() == QPointF(0.0, 0.0));
+    CHECK(simplified[1] == QPointF(100.0, 0.0));
+    CHECK(simplified.back() == QPointF(100.0, 80.0));
+}
+
+TEST_CASE("orthogonalVertices exposes the visible corners of a diagonal wire", "[editor][wireRouting]") {
+    // Un cable diagonal sin waypoints se rutea con un codo en Z: dos esquinas
+    // interiores agarrables entre los extremos.
+    const std::vector<QPointF> vertices = orthogonalVertices({{0.0, 0.0}, {100.0, 80.0}}, {});
+    REQUIRE(vertices.size() == 4);
+    CHECK(vertices.front() == QPointF(0.0, 0.0));
+    CHECK(vertices.back() == QPointF(100.0, 80.0));
+    CHECK_FALSE(anySegmentDiagonal(vertices));
+
+    // Un cable ya alineado (misma y) no tiene esquinas interiores.
+    const std::vector<QPointF> straight = orthogonalVertices({{0.0, 0.0}, {100.0, 0.0}}, {});
+    REQUIRE(straight.size() == 2);
+}
+
+TEST_CASE("buildEditedWirePath keeps the user's shape without a centered Z", "[editor][wireRouting]") {
+    // Una polilinea ya ortogonal se dibuja recta, punto por punto (sin agregar
+    // codos): mover una esquina mueve exactamente esa esquina.
+    const std::vector<QPointF> shaped{{0.0, 0.0}, {60.0, 0.0}, {60.0, 40.0}, {120.0, 40.0}};
+    const std::vector<QPointF> drawn = pathVertices(buildEditedWirePath(shaped));
+    REQUIRE(drawn.size() == shaped.size());
+    for (std::size_t i = 0; i < shaped.size(); ++i) {
+        CHECK(std::abs(drawn[i].x() - shaped[i].x()) <= kWireAlignTolerance);
+        CHECK(std::abs(drawn[i].y() - shaped[i].y()) <= kWireAlignTolerance);
+    }
+
+    // Un tramo diagonal (solo posible en un stub a un extremo fijo) se resuelve
+    // con un codo en L simple horizontal-primero: 3 vertices, no un Z centrado.
+    const std::vector<QPointF> stub = pathVertices(buildEditedWirePath({{0.0, 0.0}, {100.0, 60.0}}));
+    REQUIRE(stub.size() == 3);
+    CHECK(stub[1] == QPointF(100.0, 0.0)); // horizontal primero, luego baja
+    CHECK_FALSE(anySegmentDiagonal(stub));
 }
