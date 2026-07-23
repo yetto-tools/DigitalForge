@@ -1,5 +1,6 @@
 #include "JunctionItem.hpp"
 
+#include <QGraphicsSceneHoverEvent>
 #include <QPainter>
 #include <QStyleOptionGraphicsItem>
 #include <algorithm>
@@ -20,6 +21,7 @@ JunctionItem::JunctionItem(CircuitDocument* document, uint32_t junctionId, QGrap
     setFlag(QGraphicsItem::ItemIsSelectable, true);
     setFlag(QGraphicsItem::ItemIsMovable, true);
     setFlag(QGraphicsItem::ItemSendsGeometryChanges, true);
+    setAcceptHoverEvents(true);
     setPen(QPen(Qt::black, 1.0));
     setZValue(-0.5); // sobre los cables (zValue -1), debajo de los cuerpos de componentes
     setPos(document_->junctionPosition(junctionId_));
@@ -33,7 +35,20 @@ void JunctionItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* opti
     const bool selected = (option->state & QStyle::State_Selected) != 0;
     painter->setPen(QPen(Qt::black, selected ? 2.0 : 1.0));
     painter->setBrush(logicValueColor(value));
-    painter->drawEllipse(rect());
+    // Al pasar el mouse, agrandar un poco el punto para que se note que es
+    // agarrable/arrastrable, sin cambiar su semantica de color.
+    const QRectF r = hovered_ ? rect().adjusted(-1.5, -1.5, 1.5, 1.5) : rect();
+    painter->drawEllipse(r);
+}
+
+void JunctionItem::hoverEnterEvent(QGraphicsSceneHoverEvent*) {
+    hovered_ = true;
+    update();
+}
+
+void JunctionItem::hoverLeaveEvent(QGraphicsSceneHoverEvent*) {
+    hovered_ = false;
+    update();
 }
 
 void JunctionItem::addAttachedWire(WireItem* wire) { attachedWires_.push_back(wire); }
