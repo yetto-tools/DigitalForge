@@ -22,6 +22,7 @@
 #include <QVBoxLayout>
 #include <QFrame>
 #include <QLabel>
+#include <QDesktopServices>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -40,6 +41,7 @@
 #include <stdexcept>
 
 #include "DefaultLayout.hpp"
+#include "UpdateChecker.hpp"
 #include "editor/CircuitDocument.hpp"
 #include "editor/CircuitScene.hpp"
 #include "editor/CircuitView.hpp"
@@ -870,7 +872,23 @@ void MainWindow::setupMenusAndToolbars() {
 
     // --- Ayuda ---
     QMenu* helpMenu = menuBar()->addMenu(tr("A&yuda"));
+    helpMenu->addAction(tr("Buscar &actualizaciones..."), this, &MainWindow::onCheckForUpdatesManually);
     helpMenu->addAction(tr("&Acerca de DigitalForge..."), this, &MainWindow::onAbout);
+
+    // Comprobacion de actualizaciones contra los releases de GitHub. Se crea
+    // aca (una sola vez) y se dispara un chequeo silencioso al arrancar: si
+    // hay una version mas nueva avisa, y si no (o si no hay red) no molesta.
+    updateChecker_ = new UpdateChecker(this);
+    connect(updateChecker_, &UpdateChecker::updateAvailable, this, &MainWindow::onUpdateAvailable);
+    connect(updateChecker_, &UpdateChecker::upToDate, this, [this] {
+        QMessageBox::information(this, tr("Actualizaciones"),
+                                 tr("Estas usando la version mas reciente de DigitalForge."));
+    });
+    connect(updateChecker_, &UpdateChecker::checkFailed, this, [this](const QString& reason) {
+        QMessageBox::information(this, tr("Actualizaciones"),
+                                 tr("No se pudo comprobar si hay actualizaciones.\n\n%1").arg(reason));
+    });
+    updateChecker_->checkForUpdates(/*silent=*/true);
 
     // --- Toolbars ---
     QToolBar* mainToolBar = addToolBar(tr("Principal"));
@@ -1075,6 +1093,23 @@ void MainWindow::onAbout() {
                            "<p>El codigo fuente esta disponible en <a "
                            "href=\"https://github.com/yetto-tools/DigitalForge\">yetto-tools/DigitalForge</a></p>")
                             .arg(kAppVersion));
+}
+
+void MainWindow::onCheckForUpdatesManually() {
+    updateChecker_->checkForUpdates(/*silent=*/false);
+}
+
+void MainWindow::onUpdateAvailable(const QString& latestVersion, const QString& downloadUrl) {
+    const auto answer = QMessageBox::question(
+        this, tr("Actualizacion disponible"),
+        tr("Hay una version nueva de DigitalForge disponible: <b>%1</b>.<br>"
+           "Estas usando la %2.<br><br>"
+           "Deseas abrir la pagina de descargas?")
+            .arg(latestVersion, QString::fromUtf8(kAppVersion)),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+    if (answer == QMessageBox::Yes) {
+        QDesktopServices::openUrl(QUrl(downloadUrl));
+    }
 }
 
 void MainWindow::onPreferences() {
