@@ -39,6 +39,7 @@ public:
 
     void addAttachedWire(WireItem* wire);
     void removeAttachedWire(WireItem* wire);
+    [[nodiscard]] const std::vector<WireItem*>& attachedWires() const noexcept { return attachedWires_; }
 
     static constexpr qreal kRadius = 3.0;
 
