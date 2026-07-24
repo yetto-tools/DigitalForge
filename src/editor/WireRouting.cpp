@@ -2,91 +2,70 @@
 
 #include <QLineF>
 
-#include <algorithm>
 #include <cmath>
 
 namespace digitalforge::editor {
 
-bool verticalSegmentCrosses(qreal x, qreal yMin, qreal yMax, const QRectF& rect) {
-    return x >= rect.left() && x <= rect.right() && yMax >= rect.top() && yMin <= rect.bottom();
-}
-
-qreal chooseClearMidX(QPointF from, QPointF to, const std::vector<QRectF>& obstacles) {
-    const qreal naturalMidX = (from.x() + to.x()) / 2.0;
-    if (obstacles.empty()) {
-        return naturalMidX;
-    }
-    const qreal yMin = std::min(from.y(), to.y());
-    const qreal yMax = std::max(from.y(), to.y());
-    const auto isClear = [&](qreal x) {
-        for (const QRectF& rect : obstacles) {
-            if (verticalSegmentCrosses(x, yMin, yMax, rect)) {
-                return false;
-            }
-        }
-        return true;
-    };
-    if (isClear(naturalMidX)) {
-        return naturalMidX;
-    }
-    constexpr qreal kStep = 16.0; // 2x ComponentItem::kGridSize
-    constexpr int kMaxSteps = 24; // hasta 384px a cada lado del punto medio
-    for (int i = 1; i <= kMaxSteps; ++i) {
-        const qreal plus = naturalMidX + i * kStep;
-        if (isClear(plus)) {
-            return plus;
-        }
-        const qreal minus = naturalMidX - i * kStep;
-        if (isClear(minus)) {
-            return minus;
-        }
-    }
-    return naturalMidX;
-}
-
-void appendElbow(QPainterPath& path, QPointF from, QPointF to, const std::vector<QRectF>& obstacles) {
-    if (std::abs(from.y() - to.y()) <= kWireAlignTolerance) {
-        path.lineTo(to.x(), from.y());
-        path.lineTo(to);
-        return;
-    }
-    if (std::abs(from.x() - to.x()) <= kWireAlignTolerance) {
-        path.lineTo(from.x(), to.y());
-        path.lineTo(to);
-        return;
-    }
-    const qreal midX = chooseClearMidX(from, to, obstacles);
-    path.lineTo(midX, from.y());
-    path.lineTo(midX, to.y());
-    path.lineTo(to);
-}
-
-void appendElbowVertices(std::vector<QPointF>& vertices, QPointF from, QPointF to,
-                         const std::vector<QRectF>& obstacles) {
-    if (std::abs(from.y() - to.y()) <= kWireAlignTolerance) {
-        vertices.push_back(QPointF(to.x(), from.y()));
-        vertices.push_back(to);
-        return;
-    }
-    if (std::abs(from.x() - to.x()) <= kWireAlignTolerance) {
-        vertices.push_back(QPointF(from.x(), to.y()));
-        vertices.push_back(to);
-        return;
-    }
-    const qreal midX = chooseClearMidX(from, to, obstacles);
-    vertices.push_back(QPointF(midX, from.y()));
-    vertices.push_back(QPointF(midX, to.y()));
-    vertices.push_back(to);
-}
-
-QPainterPath buildOrthogonalPath(const std::vector<QPointF>& points, const std::vector<QRectF>& obstacles) {
-    QPainterPath path;
+std::vector<QPointF> wireVertices(const std::vector<QPointF>& points) {
     if (points.size() < 2) {
+        return points;
+    }
+    std::vector<QPointF> vertices;
+    vertices.reserve(points.size() * 2);
+    vertices.push_back(points.front());
+    for (std::size_t i = 0; i + 1 < points.size(); ++i) {
+        // Se parte del ultimo vertice ya emitido (no de points[i]) para que la
+        // lista describa exactamente la polilinea dibujada: cuando un tramo se
+        // endereza por estar dentro de la tolerancia, el punto corregido es el
+        // que vale para el tramo siguiente.
+        const QPointF from = vertices.back();
+        const QPointF to = points[i + 1];
+        const bool isLast = i + 2 == points.size();
+        if (std::abs(from.y() - to.y()) <= kWireAlignTolerance) {
+            if (isLast) {
+                // Un cable entra SIEMPRE al centro del pin. Enderezar el tramo
+                // sobre la y del quiebre lo dejaria corto por el resto
+                // sub-tolerancia (los pines no siempre caen en la grilla), asi
+                // que se corre el quiebre a la y del pin -- nunca al reves --
+                // y se termina exactamente en el. Si no hay quiebre que correr
+                // (el vertice previo es el otro extremo, tambien anclado), el
+                // resto queda como una inclinacion de <=3px, imperceptible.
+                if (vertices.size() >= 2) {
+                    vertices.back().setY(to.y());
+                }
+                vertices.push_back(to);
+            } else {
+                vertices.emplace_back(to.x(), from.y()); // horizontal
+            }
+        } else if (std::abs(from.x() - to.x()) <= kWireAlignTolerance) {
+            if (isLast) {
+                if (vertices.size() >= 2) {
+                    vertices.back().setX(to.x());
+                }
+                vertices.push_back(to);
+            } else {
+                vertices.emplace_back(from.x(), to.y()); // vertical
+            }
+        } else {
+            // Codo en L horizontal-primero: una sola forma posible, siempre la
+            // misma. Nunca un codo en Z centrado (que "saltaba" de lado al
+            // moverse los extremos) ni un desvio por obstaculos.
+            vertices.emplace_back(to.x(), from.y());
+            vertices.push_back(to);
+        }
+    }
+    return vertices;
+}
+
+QPainterPath buildWirePath(const std::vector<QPointF>& points) {
+    QPainterPath path;
+    const std::vector<QPointF> vertices = wireVertices(points);
+    if (vertices.size() < 2) {
         return path;
     }
-    path.moveTo(points.front());
-    for (std::size_t i = 0; i + 1 < points.size(); ++i) {
-        appendElbow(path, points[i], points[i + 1], obstacles);
+    path.moveTo(vertices.front());
+    for (std::size_t i = 1; i < vertices.size(); ++i) {
+        path.lineTo(vertices[i]);
     }
     return path;
 }
@@ -127,40 +106,48 @@ std::vector<QPointF> simplifyOrthogonalPolyline(const std::vector<QPointF>& vert
     return result;
 }
 
-std::vector<QPointF> orthogonalVertices(const std::vector<QPointF>& points, const std::vector<QRectF>& obstacles) {
-    if (points.size() < 2) {
+std::vector<QPointF> moveWireSegment(const std::vector<QPointF>& points, std::size_t segmentIndex,
+                                      QPointF cursorPos) {
+    if (points.size() < 2 || segmentIndex + 1 >= points.size()) {
         return points;
     }
-    std::vector<QPointF> vertices;
-    vertices.push_back(points.front());
-    for (std::size_t i = 0; i + 1 < points.size(); ++i) {
-        appendElbowVertices(vertices, points[i], points[i + 1], obstacles);
+    const std::size_t i = segmentIndex;
+    const std::size_t j = segmentIndex + 1;
+    const bool horizontal = std::abs(points[i].y() - points[j].y()) <= kWireAlignTolerance;
+
+    // Perpendicular al propio segmento: un tramo horizontal solo cambia de y y
+    // uno vertical solo de x, asi los dos vecinos siguen encontrandolo en
+    // angulo recto sin tener que tocarlos.
+    const auto shifted = [horizontal, cursorPos](QPointF p) {
+        return horizontal ? QPointF(p.x(), cursorPos.y()) : QPointF(cursorPos.x(), p.y());
+    };
+
+    std::vector<QPointF> result = points;
+    result[i] = shifted(points[i]);
+    result[j] = shifted(points[j]);
+
+    // Un extremo esta anclado a su pin/union y no se puede mover: se lo
+    // devuelve a su lugar y se inserta el vertice que absorbe el quiebre. El
+    // lado final se trata primero para que insertar ahi no corra el indice 0.
+    if (j == points.size() - 1) {
+        result[j] = points[j];
+        result.insert(result.begin() + static_cast<std::ptrdiff_t>(j), shifted(points[j]));
     }
-    return simplifyOrthogonalPolyline(vertices);
+    if (i == 0) {
+        result[0] = points[0];
+        result.insert(result.begin() + 1, shifted(points[0]));
+    }
+    return simplifyOrthogonalPolyline(result);
 }
 
-QPainterPath buildEditedWirePath(const std::vector<QPointF>& points) {
-    QPainterPath path;
-    if (points.size() < 2) {
-        return path;
+std::vector<QPointF> moveWireCorner(const std::vector<QPointF>& points, std::size_t cornerIndex,
+                                     QPointF cursorPos) {
+    if (cornerIndex == 0 || cornerIndex + 1 >= points.size()) {
+        return points; // los extremos los ancla su pin/union
     }
-    path.moveTo(points.front());
-    for (std::size_t i = 0; i + 1 < points.size(); ++i) {
-        const QPointF from = points[i];
-        const QPointF to = points[i + 1];
-        if (std::abs(from.y() - to.y()) <= kWireAlignTolerance) {
-            path.lineTo(to.x(), from.y()); // tramo horizontal (y snapeada a la del origen)
-        } else if (std::abs(from.x() - to.x()) <= kWireAlignTolerance) {
-            path.lineTo(from.x(), to.y()); // tramo vertical
-        } else {
-            // Codo en L simple, horizontal primero: predecible y estable (nunca
-            // se voltea ni salta), a diferencia del codo en Z centrado del
-            // auto-ruteo. Solo puede ocurrir en los stubs a un extremo fijo.
-            path.lineTo(to.x(), from.y());
-            path.lineTo(to);
-        }
-    }
-    return path;
+    std::vector<QPointF> result = points;
+    result[cornerIndex] = cursorPos;
+    return simplifyOrthogonalPolyline(result);
 }
 
 } // namespace digitalforge::editor
