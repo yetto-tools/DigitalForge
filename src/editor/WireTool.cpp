@@ -5,6 +5,9 @@
 #include <QPen>
 #include <QString>
 #include <QUndoStack>
+#include <algorithm>
+#include <cmath>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -26,7 +29,10 @@ namespace {
 // con lo que quedara al soltar (los pines ya estan sobre la grilla).
 QPointF snapCursor(const CircuitScene* scene, QPointF scenePos) {
     if (scene != nullptr && scene->snapToGridEnabled()) {
-        return snapToGrid(scenePos, ComponentItem::kGridSize);
+        // Media unidad, igual que los quiebres que se arrastran despues (ver
+        // kWireGridSize en WireItem.cpp): los cables pueden apoyarse tanto en
+        // las intersecciones como en el centro de cada celda.
+        return snapToGrid(scenePos, ComponentItem::kGridSize / 2.0);
     }
     return scenePos;
 }
@@ -52,6 +58,107 @@ bool isSameConnectionPoint(const WireGestureEndpoint& a, const WireGestureEndpoi
 
 WireTool::WireTool(CircuitScene* scene, CircuitDocument* document, QUndoStack* undoStack)
     : scene_(scene), document_(document), undoStack_(undoStack) {}
+
+QPointF WireTool::lastVertex() const {
+    if (!autoPoints_.empty()) {
+        return autoPoints_.back();
+    }
+    return points_.empty() ? QPointF() : points_.back();
+}
+
+void WireTool::accumulateSteps(QPointF cursorScenePos) {
+    if (axis_ == Axis::None || points_.empty()) {
+        return;
+    }
+    // Un escalon nace cuando el cursor se aparta del eje vigente mas que
+    // kStepCreate, y se deshace recien cuando vuelve por debajo de kStepRelease.
+    // Los dos umbrales son distintos A PROPOSITO (histeresis): con un umbral
+    // unico, justo sobre el limite el escalon aparecia y desaparecia con cada
+    // temblor del mouse, porque crear y deshacer miden exactamente el mismo
+    // desvio. Ademas kStepCreate son varias unidades de grilla y no una sola:
+    // con una sola (8 px, dos celdas de snap) un movimiento diagonal dejaba una
+    // escalera de escalones minusculos y el gesto se sentia hipersensible.
+    constexpr qreal kStepCreate = 3.0 * ComponentItem::kGridSize;
+    constexpr qreal kStepRelease = kStepCreate / 2.0;
+
+    // Retraccion primero: cada esquina acumulada existe por un desvio concreto
+    // (horizontal si el eje quedo en Horizontal, vertical si quedo en
+    // Vertical). Si ese desvio se deshizo, la esquina sobra.
+    while (!autoPoints_.empty()) {
+        const QPointF corner = autoPoints_.back();
+        const bool undone = axis_ == Axis::Horizontal
+                                ? std::abs(cursorScenePos.x() - corner.x()) < kStepRelease
+                                : std::abs(cursorScenePos.y() - corner.y()) < kStepRelease;
+        if (!undone) {
+            break;
+        }
+        autoPoints_.pop_back();
+        axis_ = axis_ == Axis::Horizontal ? Axis::Vertical : Axis::Horizontal;
+    }
+
+    const QPointF last = lastVertex();
+    if (axis_ == Axis::Vertical) {
+        if (std::abs(cursorScenePos.x() - last.x()) >= kStepCreate) {
+            autoPoints_.push_back(QPointF(last.x(), cursorScenePos.y()));
+            axis_ = Axis::Horizontal;
+        }
+    } else if (std::abs(cursorScenePos.y() - last.y()) >= kStepCreate) {
+        autoPoints_.push_back(QPointF(cursorScenePos.x(), last.y()));
+        axis_ = Axis::Vertical;
+    }
+}
+
+void WireTool::updateAxis(QPointF cursorScenePos) {
+    if (axis_ != Axis::None || points_.empty()) {
+        return; // ya fijado para este tramo
+    }
+    const QPointF delta = cursorScenePos - lastVertex();
+    const qreal dx = std::abs(delta.x());
+    const qreal dy = std::abs(delta.y());
+    // Hasta no alejarse un poco del ultimo punto, la direccion dominante es
+    // ruido: fijar el eje ahi haria que el codo saliera para cualquier lado.
+    constexpr qreal kAxisLockThreshold = 6.0;
+    if (std::max(dx, dy) < kAxisLockThreshold) {
+        return;
+    }
+    // Y aunque ya se haya alejado, sobre la diagonal ninguna de las dos
+    // direcciones manda de verdad: un eje elegido ahi por un pixel de
+    // diferencia se siente arbitrario, y como el eje ya no se recalcula, ese
+    // volado queda fijo para todo el tramo. Mientras el movimiento siga siendo
+    // ambiguo se espera (sin eje no hay escalera, y wireVertices() ya dibuja un
+    // codo en L por defecto); apenas el usuario define una direccion, se fija.
+    constexpr qreal kAxisDominance = ComponentItem::kGridSize;
+    if (std::abs(dx - dy) < kAxisDominance) {
+        return;
+    }
+    axis_ = dy > dx ? Axis::Vertical : Axis::Horizontal;
+}
+
+std::optional<QPointF> WireTool::autoCorner(QPointF from, QPointF to) const {
+    if (axis_ == Axis::None) {
+        return std::nullopt;
+    }
+    // Tramo recto: no hace falta ningun codo.
+    if (std::abs(from.x() - to.x()) <= kWireAlignTolerance ||
+        std::abs(from.y() - to.y()) <= kWireAlignTolerance) {
+        return std::nullopt;
+    }
+    // Vertical: primero baja/sube hasta la altura del cursor y despues va en
+    // horizontal. Horizontal: al reves.
+    return axis_ == Axis::Vertical ? QPointF(from.x(), to.y()) : QPointF(to.x(), from.y());
+}
+
+std::vector<QPointF> WireTool::pointsThrough(QPointF cursorScenePos) const {
+    std::vector<QPointF> points = points_;
+    points.insert(points.end(), autoPoints_.begin(), autoPoints_.end());
+    if (!points.empty()) {
+        if (const std::optional<QPointF> corner = autoCorner(points.back(), cursorScenePos)) {
+            points.push_back(*corner);
+        }
+    }
+    points.push_back(cursorScenePos);
+    return points;
+}
 
 WireGestureEndpoint WireTool::hitTest(QPointF scenePos) const {
     WireGestureEndpoint hit;
@@ -105,10 +212,22 @@ void WireTool::press(QGraphicsSceneMouseEvent* event) {
         commitTo(hit, pos);
         return;
     }
+    // Fijar una esquina consolida la escalera que se estaba viendo (los
+    // escalones acumulados por el movimiento pasan a ser puntos fijos) mas el
+    // codo del ultimo tramo, y reinicia el eje para que el tramo siguiente
+    // elija su propia direccion.
     const QPointF bend = hit.empty() ? snapCursor(scene_, pos) : hit.anchorPos;
+    points_.insert(points_.end(), autoPoints_.begin(), autoPoints_.end());
+    autoPoints_.clear();
+    if (!points_.empty()) {
+        if (const std::optional<QPointF> corner = autoCorner(points_.back(), bend)) {
+            points_.push_back(*corner);
+        }
+    }
     if (points_.empty() || bend != points_.back()) {
         points_.push_back(bend);
     }
+    axis_ = Axis::None;
     pressPos_ = pos;
 }
 
@@ -116,6 +235,11 @@ void WireTool::move(QGraphicsSceneMouseEvent* event) {
     if (!drawing_) {
         return;
     }
+    // La escalera se construye sobre el cursor ya ajustado a la grilla, para
+    // que cada escalon caiga sobre la reticula igual que cualquier quiebre.
+    const QPointF snapped = snapCursor(scene_, event->scenePos());
+    updateAxis(snapped);
+    accumulateSteps(snapped);
     updatePreview(event->scenePos());
 }
 
@@ -125,9 +249,9 @@ void WireTool::updatePreview(QPointF cursorScenePos) {
     }
     const WireGestureEndpoint end = hitTest(cursorScenePos);
     const QPointF endPos = end.empty() ? snapCursor(scene_, cursorScenePos) : end.anchorPos;
-    std::vector<QPointF> points = points_;
-    points.push_back(endPos);
-    previewPath_->setPath(buildOrthogonalPath(points, scene_->componentObstacleRects({})));
+    // Mismo motor y mismos puntos que el cable que va a quedar: lo que se ve
+    // en el preview es exactamente lo que se comete.
+    previewPath_->setPath(buildWirePath(pointsThrough(endPos)));
 
     // Color del preview segun el destino bajo el cursor: verde si soltar ahi
     // haria una conexion valida, rojo si es un destino invalido (el mismo
@@ -180,8 +304,17 @@ void WireTool::finishAt(QPointF scenePos) {
 
 void WireTool::commitTo(const WireGestureEndpoint& end, QPointF endScenePos) {
     const WireGestureEndpoint start = startHit_;
-    // Quiebres = todos los vertices fijados menos el ancla inicial (points_[0]).
-    std::vector<QPointF> waypoints(points_.begin() + (points_.empty() ? 0 : 1), points_.end());
+    // El ancla final es el punto real de conexion cuando hay destino; solo en
+    // el vacio se usa el cursor snappeado (ahi se creara un punto de union).
+    const QPointF endAnchor = end.empty() ? snapCursor(scene_, endScenePos) : end.anchorPos;
+    // Los mismos vertices que se estaban viendo en el preview, incluida la
+    // esquina automatica del ultimo tramo, menos las dos anclas (que las fijan
+    // los extremos).
+    const std::vector<QPointF> preview = pointsThrough(endAnchor);
+    std::vector<QPointF> waypoints;
+    if (preview.size() > 2) {
+        waypoints.assign(preview.begin() + 1, preview.end() - 1);
+    }
     cancel();
 
     // Un macro agrupa como un solo paso de undo todo lo que haga falta antes
@@ -229,6 +362,8 @@ void WireTool::cancel() {
     drawing_ = false;
     startHit_ = WireGestureEndpoint{};
     points_.clear();
+    autoPoints_.clear();
+    axis_ = Axis::None;
 }
 
 } // namespace digitalforge::editor
