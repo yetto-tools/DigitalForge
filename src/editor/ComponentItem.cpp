@@ -12,6 +12,7 @@
 #include <cmath>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "CircuitDocument.hpp"
 #include "CircuitScene.hpp"
@@ -740,46 +741,70 @@ void ComponentItem::rebuildPins() {
         height_ = static_cast<qreal>(customHeight);
     }
 
-    // Los pines se distribuyen de forma uniforme a lo largo de toda la
-    // altura en cada lado (no en pasos fijos de kGridSize), de modo que un
-    // lado con menos pines que el otro los centra en lugar de agruparlos
-    // cerca de la parte superior - esto es crucial para que el unico pin de
-    // salida de una puerta se alinee con el centro vertical de su cuerpo.
-    pinStubLength_ = isSegmentDisplay ? 10.0 : 0.0;
+    // El stub tambien es multiplo de la grilla: define la x de los pines de
+    // ese lado, asi que un valor suelto (antes 10) los sacaba de la reticula
+    // igual que cualquier otra medida.
+    pinStubLength_ = isSegmentDisplay ? 8.0 : 0.0;
+
+    // Los pines de cada lado se reparten en pasos EXACTOS de pinPitch y el
+    // grupo entero se centra en el cuerpo. Antes se dividia la altura entre
+    // la cantidad de pines (height_/(n+1)*(i+1)), lo que daba posiciones
+    // fraccionarias en cuanto height_ no fuera divisible: el 7447, por
+    // ejemplo, ponia pines cada 116/9 = 12.888..., y de ahi salian cables
+    // anclados en coordenadas como -16.888888888888886, imposibles de alinear
+    // con la grilla. Con pasos de pinPitch (multiplo de media unidad) y el
+    // grupo centrado, todo pin cae sobre la reticula y ademas queda
+    // exactamente centrado, que es lo que necesita el unico pin de salida de
+    // una puerta para alinearse con el centro vertical de su cuerpo.
+    const auto sideOffsets = [&](std::size_t count) {
+        std::vector<qreal> offsets(count, 0.0);
+        if (count == 0) {
+            return offsets;
+        }
+        const qreal span = pinPitch * static_cast<qreal>(count - 1);
+        // El centrado se cuantiza tambien: con un solo pin en un cuerpo de
+        // altura impar en unidades de grilla, height_/2 podria caer entre dos
+        // lineas.
+        const qreal first = snapToGrid((height_ - span) / 2.0, kGridSize / 2.0);
+        for (std::size_t i = 0; i < count; ++i) {
+            offsets[i] = first + pinPitch * static_cast<qreal>(i);
+        }
+        return offsets;
+    };
 
     pinLocalPositions_.assign(pins.size(), QPointF{});
     if (isIc74ls) {
         // Una franja por posicion fisica (no una por pin real + una por
         // decorativo aparte): reales y decorativos comparten la misma
         // columna, intercalados en el orden exacto del DIP.
+        const std::vector<qreal> leftY = sideOffsets(leftSeq.size());
         for (std::size_t i = 0; i < leftSeq.size(); ++i) {
-            const qreal y = height_ / static_cast<qreal>(leftSeq.size() + 1) * static_cast<qreal>(i + 1);
             if (leftSeq[i].isFunctional) {
                 if (const auto pinIndex = findPinIndexByName(pins, leftSeq[i].label)) {
-                    pinLocalPositions_[*pinIndex] = QPointF(-pinStubLength_, y);
+                    pinLocalPositions_[*pinIndex] = QPointF(-pinStubLength_, leftY[i]);
                 }
             } else {
-                decorativeLeftPositions_.push_back(QPointF(-pinStubLength_, y));
+                decorativeLeftPositions_.push_back(QPointF(-pinStubLength_, leftY[i]));
             }
         }
+        const std::vector<qreal> rightY = sideOffsets(rightSeq.size());
         for (std::size_t i = 0; i < rightSeq.size(); ++i) {
-            const qreal y = height_ / static_cast<qreal>(rightSeq.size() + 1) * static_cast<qreal>(i + 1);
             if (rightSeq[i].isFunctional) {
                 if (const auto pinIndex = findPinIndexByName(pins, rightSeq[i].label)) {
-                    pinLocalPositions_[*pinIndex] = QPointF(width_, y);
+                    pinLocalPositions_[*pinIndex] = QPointF(width_, rightY[i]);
                 }
             } else {
-                decorativeRightPositions_.push_back(QPointF(width_, y));
+                decorativeRightPositions_.push_back(QPointF(width_, rightY[i]));
             }
         }
     } else {
+        const std::vector<qreal> leftY = sideOffsets(leftPins.size());
         for (std::size_t i = 0; i < leftPins.size(); ++i) {
-            const qreal y = height_ / static_cast<qreal>(leftPins.size() + 1) * static_cast<qreal>(i + 1);
-            pinLocalPositions_[leftPins[i]] = QPointF(-pinStubLength_, y);
+            pinLocalPositions_[leftPins[i]] = QPointF(-pinStubLength_, leftY[i]);
         }
+        const std::vector<qreal> rightY = sideOffsets(rightPins.size());
         for (std::size_t i = 0; i < rightPins.size(); ++i) {
-            const qreal y = height_ / static_cast<qreal>(rightPins.size() + 1) * static_cast<qreal>(i + 1);
-            pinLocalPositions_[rightPins[i]] = QPointF(width_, y);
+            pinLocalPositions_[rightPins[i]] = QPointF(width_, rightY[i]);
         }
     }
 
