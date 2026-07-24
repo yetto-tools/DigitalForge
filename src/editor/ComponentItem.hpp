@@ -55,6 +55,7 @@ public:
 
     void addAttachedWire(WireItem* wire);
     void removeAttachedWire(WireItem* wire);
+    [[nodiscard]] const std::vector<WireItem*>& attachedWires() const noexcept { return attachedWires_; }
 
     // Multiplo de 8 a proposito: width_/pinPitch de cada tipo de componente
     // tambien se eligen como multiplos de 8 (ver ComponentItem::rebuildPins),
