@@ -2,67 +2,59 @@
 
 #include <QPainterPath>
 #include <QPointF>
-#include <QRectF>
+#include <cstddef>
 #include <vector>
 
-// Ruteo ortogonal de cables, factorizado fuera de WireItem para que tanto el
-// item de cable ya trazado como la vista previa interactiva de WireTool (y la
-// futura deteccion geometrica) construyan exactamente la misma forma. Antes
-// estas funciones eran locales al .cpp de WireItem y la vista previa dibujaba
-// una diagonal recta que no coincidia con el cable final.
+// Geometria ortogonal de cables, con el modelo de Proteus: la forma de un
+// cable es una FUNCION PURA de sus puntos guardados (extremos + quiebres), sin
+// busquedas ni esquive automatico de obstaculos. Antes habia dos motores con
+// reglas distintas -- uno que esquivaba componentes mientras el cable no
+// tuviera quiebres, y otro de codos simples apenas aparecia el primero -- asi
+// que la forma cambiaba de reglas de golpe al editarla, y ademas un cable se
+// re-ruteaba solo cuando algo se movia cerca. Todo lo de aca es deterministico:
+// los mismos puntos dan siempre exactamente el mismo trazado.
 namespace digitalforge::editor {
 
 // Umbral (en pixeles de escena) por debajo del cual dos puntos se tratan como
 // si ya compartieran x/y, para no dibujar un codo residual visible cuando dos
-// pines estan casi -pero no exactamente- alineados.
+// pines estan casi -pero no exactamente- alineados. Igual a PinItem::kRadius,
+// para que la correccion quede escondida dentro del propio punto del pin.
 inline constexpr qreal kWireAlignTolerance = 3.0;
 
-// True si el tramo vertical en `x` (recorriendo y entre yMin..yMax) cruza el
-// rectangulo `rect`.
-[[nodiscard]] bool verticalSegmentCrosses(qreal x, qreal yMin, qreal yMax, const QRectF& rect);
+// Los vertices por los que pasa el cable que une `points` (>=2, tipicamente
+// [extremoA, quiebres..., extremoB]): recto donde dos puntos consecutivos ya
+// comparten x o y, y un unico codo en L (horizontal primero) donde no. Es la
+// lista sobre la que razona el hit-testing, y coincide exactamente con lo que
+// dibuja buildWirePath().
+[[nodiscard]] std::vector<QPointF> wireVertices(const std::vector<QPointF>& points);
 
-// Elige la x del tramo vertical del codo entre `from` y `to`: el punto medio
-// natural si esta libre de `obstacles`, o el candidato libre mas cercano.
-[[nodiscard]] qreal chooseClearMidX(QPointF from, QPointF to, const std::vector<QRectF>& obstacles);
-
-// Agrega a `path` (que ya debe empezar en `from`) los quiebres en angulo recto
-// hasta `to`. Se degenera a una linea recta cuando ya comparten x o y.
-void appendElbow(QPainterPath& path, QPointF from, QPointF to, const std::vector<QRectF>& obstacles);
-
-// Los vertices que appendElbow() realmente dibujaria para el tramo `from`->`to`
-// (incluye `to`), para que el hit-testing razone sobre la ruta dibujada.
-void appendElbowVertices(std::vector<QPointF>& vertices, QPointF from, QPointF to,
-                         const std::vector<QRectF>& obstacles);
-
-// Construye la polilinea ortogonal completa que pasa por `points` (>=2), con
-// codos que esquivan `obstacles`. Devuelve un path vacio si hay menos de 2.
-[[nodiscard]] QPainterPath buildOrthogonalPath(const std::vector<QPointF>& points,
-                                               const std::vector<QRectF>& obstacles);
-
-// Todos los vertices por los que pasa la ruta ortogonal que une `points`
-// (>=2), incluidos los codos que appendElbowVertices() inserta para esquivar
-// `obstacles`, ya simplificados con simplifyOrthogonalPolyline(). Es la version
-// en vector de buildOrthogonalPath(): el editor la usa para saber donde estan
-// las esquinas VISIBLES del cable (aunque no sean waypoints guardados) y
-// poder agarrarlas.
-[[nodiscard]] std::vector<QPointF> orthogonalVertices(const std::vector<QPointF>& points,
-                                                      const std::vector<QRectF>& obstacles);
+// El trazado de wireVertices() como QPainterPath. Path vacio si hay menos de
+// dos puntos.
+[[nodiscard]] QPainterPath buildWirePath(const std::vector<QPointF>& points);
 
 // Quita de una polilinea los vertices redundantes: duplicados consecutivos
 // (dentro de kWireAlignTolerance) y puntos colineales (un vertice que cae
 // sobre la recta entre su vecino anterior y el siguiente, es decir, no es una
-// esquina real). Deja la minima secuencia de esquinas reales, de modo que
-// arrastrar una esquina mueva un vertice significativo y no un punto
-// degenerado.
+// esquina real). Conserva siempre el primero y el ultimo (los extremos).
 [[nodiscard]] std::vector<QPointF> simplifyOrthogonalPolyline(const std::vector<QPointF>& vertices);
 
-// Dibuja un cable YA EDITADO por el usuario, cuya lista de puntos (extremos +
-// waypoints) ya describe la forma deseada: cada tramo se dibuja recto si sus
-// extremos comparten x o y, y con un unico codo en L (horizontal primero) si
-// no -- sin el codo en Z centrado ni el desvio por obstaculos de
-// buildOrthogonalPath(). Asi, mover una esquina mueve exactamente esa esquina,
-// sin que el trazado "salte" (el defecto reportado). Los cables sin waypoints
-// siguen usando buildOrthogonalPath() (auto-ruteo con esquive).
-[[nodiscard]] QPainterPath buildEditedWirePath(const std::vector<QPointF>& points);
+// Desplaza el segmento `segmentIndex` (el que va de points[i] a points[i+1])
+// hasta `cursorPos`, perpendicular a si mismo: un tramo horizontal solo cambia
+// de y, uno vertical solo de x, de modo que los angulos rectos con sus vecinos
+// se conservan solos. Es el gesto central del cableado estilo Proteus.
+//
+// points.front()/back() son los extremos, anclados a un pin o punto de union:
+// no se pueden mover. Si el segmento arrastrado toca uno, el extremo se deja
+// donde estaba y se inserta un vertice extra que absorbe el quiebre (el cable
+// "se estira" desde el pin en vez de despegarse de el).
+[[nodiscard]] std::vector<QPointF> moveWireSegment(const std::vector<QPointF>& points, std::size_t segmentIndex,
+                                                   QPointF cursorPos);
+
+// Lleva la esquina interior `cornerIndex` a `cursorPos`. Los brazos siguen
+// ortogonales porque wireVertices() vuelve a resolver cada tramo; no hace falta
+// deslizar los vecinos a mano. Devuelve `points` sin cambios si el indice es un
+// extremo (esos no se mueven: los ancla su pin).
+[[nodiscard]] std::vector<QPointF> moveWireCorner(const std::vector<QPointF>& points, std::size_t cornerIndex,
+                                                  QPointF cursorPos);
 
 } // namespace digitalforge::editor
