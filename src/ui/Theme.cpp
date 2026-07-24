@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QPalette>
+#include <QProxyStyle>
 #include <QStyle>
 #include <QStyleFactory>
 #include <QStyleHints>
@@ -10,6 +11,37 @@
 namespace digitalforge::ui {
 
 namespace {
+
+// Fusion dibuja el texto deshabilitado "grabado" (SH_EtchDisabledText = 1): lo
+// pinta dos veces, primero un fantasma en palette.light() corrido un pixel
+// abajo-derecha y encima el texto real (ver QCommonStyle::drawItemText). Sobre
+// una paleta clara ese fantasma es casi blanco sobre fondo casi blanco y no se
+// nota, pero sobre el fondo oscuro queda bien visible y el texto se lee doble
+// o borroso -- se veia, por ejemplo, en la opcion deshabilitada del menu
+// Bibliotecas. El estilo nativo de Windows 11 ya devuelve 0 en este hint, asi
+// que apagarlo ademas deja los tres modos de tema consistentes entre si; en
+// Linux importa tambien para el modo Sistema, donde el estilo nativo suele ser
+// justamente Fusion.
+class NoEtchedTextStyle : public QProxyStyle {
+public:
+    using QProxyStyle::QProxyStyle;
+
+    int styleHint(StyleHint hint, const QStyleOption* option, const QWidget* widget,
+                  QStyleHintReturn* returnData) const override {
+        if (hint == SH_EtchDisabledText) {
+            return 0;
+        }
+        return QProxyStyle::styleHint(hint, option, widget, returnData);
+    }
+};
+
+// El estilo `name` envuelto en NoEtchedTextStyle. Devuelve nullptr si el
+// estilo no existe, para no pisar el actual con nada. QProxyStyle toma la
+// propiedad del estilo que envuelve, y QApplication::setStyle() la del proxy.
+QStyle* themedStyle(const QString& name) {
+    QStyle* base = QStyleFactory::create(name);
+    return base != nullptr ? new NoEtchedTextStyle(base) : nullptr;
+}
 
 // Paletas explicitas (no derivadas del sistema) para que "Claro" y "Oscuro"
 // se vean igual en cualquier maquina, que es justamente el sentido de forzar
@@ -113,17 +145,17 @@ void ThemeManager::setMode(ThemeMode mode) {
         case ThemeMode::System:
             // Estilo nativo, pero con paleta propia calculada segun el
             // esquema de color real del SO (ver applySystemPalette()).
-            if (!nativeStyleName_.isEmpty()) {
-                QApplication::setStyle(QStyleFactory::create(nativeStyleName_));
+            if (QStyle* native = nativeStyleName_.isEmpty() ? nullptr : themedStyle(nativeStyleName_)) {
+                QApplication::setStyle(native);
             }
             applySystemPalette();
             break;
         case ThemeMode::Light:
-            QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+            QApplication::setStyle(themedStyle(QStringLiteral("Fusion")));
             QApplication::setPalette(buildLightPalette());
             break;
         case ThemeMode::Dark:
-            QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+            QApplication::setStyle(themedStyle(QStringLiteral("Fusion")));
             QApplication::setPalette(buildDarkPalette());
             break;
     }
