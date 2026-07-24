@@ -55,18 +55,13 @@ public:
 
     [[nodiscard]] ComponentItem* componentItem(uint32_t componentId) const;
     [[nodiscard]] JunctionItem* junctionItem(uint32_t junctionId) const;
+    [[nodiscard]] WireItem* wireItem(uint32_t wireId) const;
     [[nodiscard]] PinItem* pinItemAt(QPointF scenePos) const;
     [[nodiscard]] JunctionItem* junctionItemAt(QPointF scenePos) const;
     // Cable bajo scenePos, si lo hay -- usado por WireTool para detectar una
     // "derivacion pendiente" al presionar/soltar sobre el cuerpo de un cable
     // ya trazado (en vez de sobre un pin o un punto de union existente).
     [[nodiscard]] WireItem* wireItemAt(QPointF scenePos) const;
-    // Bounding rect (en coordenadas de escena) de cada ComponentItem del
-    // documento salvo los que aparezcan en `excludeIds` -- usado por
-    // WireItem::updateGeometry() (ver appendElbow() en WireItem.cpp) para
-    // esquivarlos al auto-rutear en vez de dibujar el trazado encima. Nunca
-    // incluye WireItem/JunctionItem (esos no cuentan como obstaculo).
-    [[nodiscard]] std::vector<QRectF> componentObstacleRects(const std::set<uint32_t>& excludeIds) const;
     void selectComponent(uint32_t componentId);
 
     [[nodiscard]] bool snapToGridEnabled() const noexcept { return snapToGrid_; }
@@ -149,25 +144,12 @@ private:
     // true. Usado tanto por el doble clic (modo edicion) como por el clic
     // simple mientras la simulacion esta en ejecucion.
     bool tryToggleInput(QPointF scenePos);
-    // Uniones derivadas de la geometria actual de la escena, entregadas a
-    // CircuitDocument como "provider" (ver setGeometricConnectionProvider):
-    // puntos de conexion (pines/uniones) que coinciden en la misma celda de
-    // grilla, o que caen sobre el cuerpo de un cable del que no son extremo
-    // (derivacion en T). Los cruces en 4 vias no producen union (no hay un
-    // punto de conexion en el cruce), igual que en Logisim.
-    [[nodiscard]] std::vector<std::pair<WireEndpoint, WireEndpoint>> computeGeometricConnections() const;
 
     CircuitDocument* document_;
     QUndoStack* undoStack_;
     EditorMode mode_ = EditorMode::Selection;
     bool snapToGrid_ = true;
     bool showGrid_ = true;
-    // En modo Selection, pulsar sobre un pin inicia directamente un arrastre
-    // de cable (no se necesita un paso separado para "entrar en modo
-    // wiring") - es true mientras ese arrastre esta en curso, de modo que
-    // mouseMove/mouseRelease sigan enrutando a wireTool_ en lugar de al
-    // comportamiento de seleccion por defecto.
-    bool draggingWireFromSelection_ = false;
     // Posicion (en coordenadas de escena) del ultimo press en modo Selection
     // que no inicio un cable; mouseReleaseEvent la compara contra la posicion
     // de release para distinguir un clic simple de un arrastre, de modo que
