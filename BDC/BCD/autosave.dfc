@@ -12,8 +12,8 @@
       "definitionVersion": 1,
       "instanceId": 3,
       "position": {
-        "x": -360.0,
-        "y": -0.0
+        "x": -192.0,
+        "y": -96.0
       },
       "properties": {
         "customHeight": 0,
@@ -39,8 +39,8 @@
       "definitionVersion": 1,
       "instanceId": 4,
       "position": {
-        "x": -360.0,
-        "y": 32.0
+        "x": -192.0,
+        "y": -64.0
       },
       "properties": {
         "customHeight": 0,
@@ -66,8 +66,8 @@
       "definitionVersion": 1,
       "instanceId": 5,
       "position": {
-        "x": -360.0,
-        "y": 64.0
+        "x": -192.0,
+        "y": -32.0
       },
       "properties": {
         "customHeight": 0,
@@ -93,8 +93,8 @@
       "definitionVersion": 1,
       "instanceId": 6,
       "position": {
-        "x": -104.0,
-        "y": 8.0
+        "x": 88.0,
+        "y": -88.0
       },
       "properties": {
         "commonAnode": true,
@@ -121,8 +121,8 @@
       "definitionVersion": 1,
       "instanceId": 7,
       "position": {
-        "x": -256.0,
-        "y": -24.0
+        "x": -72.0,
+        "y": -120.0
       },
       "properties": {
         "bodyColor": "#2B2B2B",
@@ -150,8 +150,8 @@
       "definitionVersion": 1,
       "instanceId": 8,
       "position": {
-        "x": -232.0,
-        "y": 120.0
+        "x": -72.0,
+        "y": 40.0
       },
       "properties": {
         "color": "blue",
@@ -178,8 +178,8 @@
       "definitionVersion": 1,
       "instanceId": 10,
       "position": {
-        "x": -360.0,
-        "y": -32.0
+        "x": -192.0,
+        "y": -128.0
       },
       "properties": {
         "customHeight": 0,
@@ -194,120 +194,102 @@
       "zOrder": 0
     }
   ],
-  "junctions": [],
+  "junctions": [
+    {
+      "id": 0,
+      "x": -128.0,
+      "y": -104.0
+    },
+    {
+      "id": 2,
+      "x": -128.0,
+      "y": -104.0
+    }
+  ],
   "schemaVersion": 1,
   "wires": [
     {
       "a": {
-        "componentId": 7,
-        "kind": "pin",
-        "pinIndex": 4,
-        "pinKey": "a"
+        "junctionId": 2,
+        "kind": "junction"
       },
       "b": {
-        "componentId": 6,
+        "junctionId": 0,
+        "kind": "junction"
+      },
+      "id": 27,
+      "waypoints": []
+    },
+    {
+      "a": {
+        "componentId": 3,
         "kind": "pin",
         "pinIndex": 0,
-        "pinKey": "a"
-      },
-      "id": 4,
-      "waypoints": []
-    },
-    {
-      "a": {
-        "componentId": 7,
-        "kind": "pin",
-        "pinIndex": 5,
-        "pinKey": "b"
+        "pinKey": "Y"
       },
       "b": {
-        "componentId": 6,
-        "kind": "pin",
-        "pinIndex": 1,
-        "pinKey": "b"
-      },
-      "id": 5,
-      "waypoints": []
-    },
-    {
-      "a": {
-        "componentId": 6,
+        "componentId": 7,
         "kind": "pin",
         "pinIndex": 2,
-        "pinKey": "c"
+        "pinKey": "bit2"
       },
-      "b": {
-        "componentId": 7,
-        "kind": "pin",
-        "pinIndex": 6,
-        "pinKey": "c"
-      },
-      "id": 6,
-      "waypoints": []
+      "id": 32,
+      "waypoints": [
+        {
+          "x": -152.0,
+          "y": -80.0
+        },
+        {
+          "x": -140.0,
+          "y": -92.0
+        }
+      ]
     },
     {
       "a": {
-        "componentId": 6,
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 0,
+        "pinKey": "bit0"
+      },
+      "b": {
+        "componentId": 5,
+        "kind": "pin",
+        "pinIndex": 0,
+        "pinKey": "Y"
+      },
+      "id": 35,
+      "waypoints": [
+        {
+          "x": -160.0,
+          "y": -32.0
+        }
+      ]
+    },
+    {
+      "a": {
+        "componentId": 10,
+        "kind": "pin",
+        "pinIndex": 0,
+        "pinKey": "Y"
+      },
+      "b": {
+        "componentId": 7,
         "kind": "pin",
         "pinIndex": 3,
-        "pinKey": "d"
+        "pinKey": "bit3"
       },
-      "b": {
-        "componentId": 7,
-        "kind": "pin",
-        "pinIndex": 7,
-        "pinKey": "d"
-      },
-      "id": 7,
-      "waypoints": []
-    },
-    {
-      "a": {
-        "componentId": 6,
-        "kind": "pin",
-        "pinIndex": 4,
-        "pinKey": "e"
-      },
-      "b": {
-        "componentId": 7,
-        "kind": "pin",
-        "pinIndex": 8,
-        "pinKey": "e"
-      },
-      "id": 8,
-      "waypoints": []
-    },
-    {
-      "a": {
-        "componentId": 6,
-        "kind": "pin",
-        "pinIndex": 5,
-        "pinKey": "f"
-      },
-      "b": {
-        "componentId": 7,
-        "kind": "pin",
-        "pinIndex": 9,
-        "pinKey": "f"
-      },
-      "id": 9,
-      "waypoints": []
-    },
-    {
-      "a": {
-        "componentId": 6,
-        "kind": "pin",
-        "pinIndex": 6,
-        "pinKey": "g"
-      },
-      "b": {
-        "componentId": 7,
-        "kind": "pin",
-        "pinIndex": 10,
-        "pinKey": "g"
-      },
-      "id": 10,
-      "waypoints": []
+      "id": 36,
+      "waypoints": [
+        {
+          "x": -92.0,
+          "y": -112.0
+        },
+        {
+          "x": -92.0,
+          "y": -44.0
+        }
+      ]
     },
     {
       "a": {
@@ -317,16 +299,41 @@
         "pinKey": "Y"
       },
       "b": {
-        "componentId": 7,
+        "componentId": 8,
         "kind": "pin",
         "pinIndex": 0,
         "pinKey": "bit0"
       },
-      "id": 19,
+      "id": 37,
       "waypoints": [
         {
-          "x": -312.0,
-          "y": 80.0
+          "x": -160.0,
+          "y": 60.0
+        }
+      ]
+    },
+    {
+      "a": {
+        "componentId": 4,
+        "kind": "pin",
+        "pinIndex": 0,
+        "pinKey": "Y"
+      },
+      "b": {
+        "componentId": 8,
+        "kind": "pin",
+        "pinIndex": 1,
+        "pinKey": "bit1"
+      },
+      "id": 38,
+      "waypoints": [
+        {
+          "x": -148.0,
+          "y": -48.0
+        },
+        {
+          "x": -148.0,
+          "y": 68.0
         }
       ]
     },
@@ -338,77 +345,26 @@
         "pinKey": "Y"
       },
       "b": {
-        "componentId": 7,
-        "kind": "pin",
-        "pinIndex": 2,
-        "pinKey": "bit2"
-      },
-      "id": 21,
-      "waypoints": []
-    },
-    {
-      "a": {
-        "componentId": 4,
-        "kind": "pin",
-        "pinIndex": 0,
-        "pinKey": "Y"
-      },
-      "b": {
-        "componentId": 7,
-        "kind": "pin",
-        "pinIndex": 1,
-        "pinKey": "bit1"
-      },
-      "id": 28,
-      "waypoints": []
-    },
-    {
-      "a": {
-        "componentId": 5,
-        "kind": "pin",
-        "pinIndex": 0,
-        "pinKey": "Y"
-      },
-      "b": {
-        "componentId": 8,
-        "kind": "pin",
-        "pinIndex": 0,
-        "pinKey": "bit0"
-      },
-      "id": 29,
-      "waypoints": []
-    },
-    {
-      "a": {
-        "componentId": 4,
-        "kind": "pin",
-        "pinIndex": 0,
-        "pinKey": "Y"
-      },
-      "b": {
-        "componentId": 8,
-        "kind": "pin",
-        "pinIndex": 1,
-        "pinKey": "bit1"
-      },
-      "id": 30,
-      "waypoints": []
-    },
-    {
-      "a": {
-        "componentId": 3,
-        "kind": "pin",
-        "pinIndex": 0,
-        "pinKey": "Y"
-      },
-      "b": {
         "componentId": 8,
         "kind": "pin",
         "pinIndex": 2,
         "pinKey": "bit2"
       },
-      "id": 31,
-      "waypoints": []
+      "id": 39,
+      "waypoints": [
+        {
+          "x": -160.0,
+          "y": -80.0
+        },
+        {
+          "x": -140.0,
+          "y": -80.0
+        },
+        {
+          "x": -140.0,
+          "y": 76.0
+        }
+      ]
     },
     {
       "a": {
@@ -423,17 +379,21 @@
         "pinIndex": 3,
         "pinKey": "bit3"
       },
-      "id": 32,
+      "id": 40,
       "waypoints": [
         {
-          "x": -312.0,
-          "y": -16.0
+          "x": -132.0,
+          "y": -112.0
+        },
+        {
+          "x": -132.0,
+          "y": 84.0
         }
       ]
     },
     {
       "a": {
-        "componentId": 3,
+        "componentId": 4,
         "kind": "pin",
         "pinIndex": 0,
         "pinKey": "Y"
@@ -441,11 +401,199 @@
       "b": {
         "componentId": 7,
         "kind": "pin",
-        "pinIndex": 3,
-        "pinKey": "bit3"
+        "pinIndex": 1,
+        "pinKey": "bit1"
       },
-      "id": 33,
-      "waypoints": []
+      "id": 41,
+      "waypoints": [
+        {
+          "x": -148.0,
+          "y": -48.0
+        },
+        {
+          "x": -148.0,
+          "y": -104.0
+        }
+      ]
+    },
+    {
+      "a": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 10,
+        "pinKey": "g"
+      },
+      "b": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 6,
+        "pinKey": "g"
+      },
+      "id": 45,
+      "waypoints": [
+        {
+          "x": 68.0,
+          "y": -80.0
+        },
+        {
+          "x": 68.0,
+          "y": -32.0
+        }
+      ]
+    },
+    {
+      "a": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 9,
+        "pinKey": "f"
+      },
+      "b": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 5,
+        "pinKey": "f"
+      },
+      "id": 46,
+      "waypoints": [
+        {
+          "x": 64.0,
+          "y": -92.0
+        },
+        {
+          "x": 64.0,
+          "y": -40.0
+        }
+      ]
+    },
+    {
+      "a": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 8,
+        "pinKey": "e"
+      },
+      "b": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 4,
+        "pinKey": "e"
+      },
+      "id": 47,
+      "waypoints": [
+        {
+          "x": 60.0,
+          "y": -20.0
+        },
+        {
+          "x": 60.0,
+          "y": -48.0
+        }
+      ]
+    },
+    {
+      "a": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 7,
+        "pinKey": "d"
+      },
+      "b": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 3,
+        "pinKey": "d"
+      },
+      "id": 48,
+      "waypoints": [
+        {
+          "x": 56.0,
+          "y": -32.0
+        },
+        {
+          "x": 56.0,
+          "y": -56.0
+        }
+      ]
+    },
+    {
+      "a": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 6,
+        "pinKey": "c"
+      },
+      "b": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 2,
+        "pinKey": "c"
+      },
+      "id": 49,
+      "waypoints": [
+        {
+          "x": 52.0,
+          "y": -44.0
+        },
+        {
+          "x": 52.0,
+          "y": -64.0
+        }
+      ]
+    },
+    {
+      "a": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 5,
+        "pinKey": "b"
+      },
+      "b": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 1,
+        "pinKey": "b"
+      },
+      "id": 50,
+      "waypoints": [
+        {
+          "x": 44.0,
+          "y": -56.0
+        },
+        {
+          "x": 44.0,
+          "y": -72.0
+        }
+      ]
+    },
+    {
+      "a": {
+        "componentId": 7,
+        "kind": "pin",
+        "pinIndex": 4,
+        "pinKey": "a"
+      },
+      "b": {
+        "componentId": 6,
+        "kind": "pin",
+        "pinIndex": 0,
+        "pinKey": "a"
+      },
+      "id": 51,
+      "waypoints": [
+        {
+          "x": 28.0,
+          "y": -68.0
+        },
+        {
+          "x": 28.0,
+          "y": -88.0
+        },
+        {
+          "x": 80.0,
+          "y": -88.0
+        }
+      ]
     }
   ]
 }
