@@ -1,6 +1,7 @@
 #include "CircuitScene.hpp"
 
 #include <QApplication>
+#include <QGraphicsView>
 #include <QGraphicsSceneContextMenuEvent>
 #include <QGraphicsSceneMouseEvent>
 #include <QKeyEvent>
@@ -86,10 +87,6 @@ CircuitScene::CircuitScene(CircuitDocument* document, QUndoStack* undoStack, QOb
     connect(QApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
             [this](Qt::ColorScheme) { update(); });
 
-    // La conectividad geometrica se calcula aca (la vista es la unica que
-    // conoce las coordenadas de escena de los pines) y se entrega al
-    // documento, que la incorpora a su union-find en cada rebuildSimulation().
-    document_->setGeometricConnectionProvider([this] { return computeGeometricConnections(); });
 }
 
 CircuitScene::~CircuitScene() = default;
@@ -122,6 +119,11 @@ JunctionItem* CircuitScene::junctionItem(uint32_t junctionId) const {
     return it == junctionItems_.end() ? nullptr : it->second;
 }
 
+WireItem* CircuitScene::wireItem(uint32_t wireId) const {
+    const auto it = wireItems_.find(wireId);
+    return it == wireItems_.end() ? nullptr : it->second;
+}
+
 PinItem* CircuitScene::pinItemAt(QPointF scenePos) const {
     const QList<QGraphicsItem*> hits = items(scenePos);
     for (QGraphicsItem* item : hits) {
@@ -152,18 +154,6 @@ WireItem* CircuitScene::wireItemAt(QPointF scenePos) const {
     return nullptr;
 }
 
-std::vector<QRectF> CircuitScene::componentObstacleRects(const std::set<uint32_t>& excludeIds) const {
-    std::vector<QRectF> rects;
-    rects.reserve(componentItems_.size());
-    for (const auto& [id, item] : componentItems_) {
-        if (excludeIds.contains(id)) {
-            continue;
-        }
-        rects.push_back(item->sceneBoundingRect());
-    }
-    return rects;
-}
-
 void CircuitScene::selectComponent(uint32_t componentId) {
     clearSelection();
     if (ComponentItem* item = componentItem(componentId)) {
@@ -191,22 +181,57 @@ void CircuitScene::drawBackground(QPainter* painter, const QRectF& rect) {
         return;
     }
     const qreal grid = ComponentItem::kGridSize;
+    const bool dark = background.lightness() < 128;
     // La grilla debe distinguirse del fondo sin importar si el tema es claro
     // u oscuro: aclarar un fondo oscuro y oscurecer uno claro logra ambos
     // casos con la misma expresion.
-    const QColor gridColor = background.lightness() < 128 ? background.lighter(140) : background.darker(110);
-    painter->setPen(QPen(gridColor, 0));
-    const qreal left = std::floor(rect.left() / grid) * grid;
-    const qreal top = std::floor(rect.top() / grid) * grid;
-    for (qreal x = left; x < rect.right(); x += grid) {
-        painter->drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()));
+    const QColor gridColor = dark ? background.lighter(140) : background.darker(110);
+    // Media unidad, mas tenue: marca el CENTRO de cada celda. Los componentes
+    // se ajustan a la unidad entera, pero los cables tambien pueden apoyarse
+    // en estos centros (ver kWireGridSize en WireItem.cpp), que es donde caen
+    // los pines centrados -- sin dibujarlos no habria referencia visual de
+    // adonde va a caer un quiebre.
+    const QColor halfGridColor = dark ? background.lighter(115) : background.darker(103);
+    const qreal half = grid / 2.0;
+
+    const auto drawLattice = [&](qreal step, const QColor& color) {
+        painter->setPen(QPen(color, 0));
+        const qreal left = std::floor(rect.left() / step) * step;
+        const qreal top = std::floor(rect.top() / step) * step;
+        for (qreal x = left; x < rect.right(); x += step) {
+            painter->drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()));
+        }
+        for (qreal y = top; y < rect.bottom(); y += step) {
+            painter->drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y));
+        }
+    };
+
+    // Las medias solo cuando de verdad se separan en pantalla: a poco zoom una
+    // linea cada 4px de escena se empasta en una mancha solida y ensucia el
+    // lienzo en vez de ayudar a ubicar los centros.
+    qreal scale = 1.0;
+    if (!views().isEmpty()) {
+        scale = views().first()->transform().m11();
     }
-    for (qreal y = top; y < rect.bottom(); y += grid) {
-        painter->drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y));
+    constexpr qreal kMinLatticeSpacingPx = 6.0;
+    if (half * scale >= kMinLatticeSpacingPx) {
+        // Las medias primero y las enteras encima, para que las enteras sigan
+        // leyendose como la referencia principal.
+        drawLattice(half, halfGridColor);
     }
+    drawLattice(grid, gridColor);
 }
 
 void CircuitScene::mousePressEvent(QGraphicsSceneMouseEvent* event) {
+    // Un trazado en curso se comporta igual en cualquier modo (modeless, como
+    // en Proteus): cada clic fija una esquina o cierra el cable sobre el
+    // destino que haya debajo. No se llama a la clase base para que ese clic
+    // no altere ademas la seleccion.
+    if (wireTool_->isDrawing()) {
+        wireTool_->press(event);
+        return;
+    }
+
     switch (mode_) {
         case EditorMode::Selection:
             // Siempre se deja que la gestion interna de Qt para el
@@ -222,7 +247,12 @@ void CircuitScene::mousePressEvent(QGraphicsSceneMouseEvent* event) {
             // cualquier modo - no existe un paso separado para "entrar en
             // modo wiring".
             if (pinItemAt(event->scenePos()) != nullptr) {
-                draggingWireFromSelection_ = true;
+                wireTool_->press(event);
+            } else if ((event->modifiers() & Qt::ControlModifier) != 0 &&
+                       wireItemAt(event->scenePos()) != nullptr) {
+                // Ctrl+arrastre sobre un cable saca una derivacion desde ese
+                // punto. Sin Ctrl el cuerpo del cable pertenece a WireItem,
+                // que lo usa para desplazar el segmento (ver WireItem.hpp).
                 wireTool_->press(event);
             } else {
                 pressScenePos_ = event->scenePos();
@@ -239,34 +269,26 @@ void CircuitScene::mousePressEvent(QGraphicsSceneMouseEvent* event) {
 }
 
 void CircuitScene::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
-    if (mode_ == EditorMode::Selection) {
-        QGraphicsScene::mouseMoveEvent(event);
-    }
-    if (draggingWireFromSelection_) {
+    if (wireTool_->isDrawing()) {
         wireTool_->move(event);
         return;
     }
-    if (mode_ == EditorMode::Wiring) {
-        wireTool_->move(event);
+    if (mode_ == EditorMode::Selection) {
+        QGraphicsScene::mouseMoveEvent(event);
+        selectionTool_->afterMove(event);
     }
 }
 
 void CircuitScene::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
+    if (wireTool_->isDrawing()) {
+        // Si el gesto fue un arrastre de A a B, release() cierra el cable; si
+        // fue un clic simple, el trazado queda abierto y se sigue con clics
+        // sucesivos (esquina) hasta cerrarlo sobre un destino.
+        wireTool_->release(event);
+        return;
+    }
     if (mode_ == EditorMode::Selection) {
         QGraphicsScene::mouseReleaseEvent(event);
-    }
-    if (draggingWireFromSelection_) {
-        draggingWireFromSelection_ = false;
-        wireTool_->release(event);
-        // El dibujo multi-segmento por clics solo se soporta en modo Wiring
-        // (donde la escena reenvia los movimientos de hover y los clics
-        // sucesivos al WireTool). Iniciado desde un pin en modo Selection, el
-        // gesto es siempre de un solo segmento por arrastre: si quedo abierto
-        // (fue un clic sin arrastre), se cancela aca.
-        if (wireTool_->isDrawing()) {
-            wireTool_->cancel();
-        }
-        return;
     }
     switch (mode_) {
         case EditorMode::Selection: {
@@ -745,12 +767,9 @@ void CircuitScene::onWireAdded(uint32_t wireId) {
     }
     auto* wireItem = new WireItem(document_, undoStack_, wireId, w->a, w->b, anchorA, anchorB);
     addItem(wireItem);
-    // El constructor de WireItem ya llamo a updateGeometry() una vez, pero
-    // en ese momento scene() todavia era nullptr (se llama antes del
-    // addItem() de arriba) - se recalcula aca, ahora que si puede consultar
-    // CircuitScene::componentObstacleRects(), para que el trazado inicial
-    // ya nazca esquivando a los demas componentes en vez de esperar a que
-    // algo lo mueva y dispare otro recalculo.
+    // El constructor de WireItem ya llamo a updateGeometry() una vez, pero en
+    // ese momento scene() todavia era nullptr (se llama antes del addItem() de
+    // arriba) - se recalcula aca, con el item ya dentro de la escena.
     wireItem->updateGeometry();
     wireItems_[wireId] = wireItem;
 }
@@ -793,9 +812,6 @@ void CircuitScene::onJunctionPositionChanged(uint32_t junctionId) {
     if (it != junctionItems_.end()) {
         it->second->setPos(document_->junctionPosition(junctionId));
     }
-    // Mover una union puede hacerla coincidir/dejar de coincidir con un pin u
-    // otra union: recalcular la conectividad geometrica.
-    document_->recomputeConnectivity();
 }
 
 void CircuitScene::onPropertyChanged(uint32_t componentId) {
@@ -812,63 +828,8 @@ void CircuitScene::onComponentPlacementChanged(uint32_t componentId) {
     if (it != componentItems_.end()) {
         applyPlacement(it->second, document_->componentPlacement(componentId));
     }
-    // Un movimiento puede hacer que un pin pase a tocar otro pin o el cuerpo
-    // de un cable: recalcular la conectividad geometrica (antes mover era pura
-    // geometria y no afectaba la simulacion).
-    document_->recomputeConnectivity();
 }
 
 void CircuitScene::onSimulationChanged() { update(); }
-
-std::vector<std::pair<WireEndpoint, WireEndpoint>> CircuitScene::computeGeometricConnections() const {
-    struct Point {
-        WireEndpoint ref;
-        QPointF pos;
-    };
-    std::vector<Point> points;
-    for (const auto& [id, item] : componentItems_) {
-        const auto count = static_cast<uint16_t>(item->pinCount());
-        for (uint16_t p = 0; p < count; ++p) {
-            points.push_back({WireEndpoint(PinRef{id, p}), item->pinScenePos(p)});
-        }
-    }
-    for (const auto& [id, item] : junctionItems_) {
-        points.push_back({WireEndpoint::junction(id), item->scenePos()});
-    }
-
-    std::vector<std::pair<WireEndpoint, WireEndpoint>> unions;
-
-    // Coincidencia: dos puntos de conexion en la misma celda de grilla se unen
-    // (pin sobre pin, union sobre pin, union sobre union) aunque no compartan
-    // ningun cable dibujado.
-    const qreal grid = ComponentItem::kGridSize;
-    std::map<std::pair<long long, long long>, WireEndpoint> firstInCell;
-    for (const Point& pt : points) {
-        const std::pair<long long, long long> key{std::llround(pt.pos.x() / grid), std::llround(pt.pos.y() / grid)};
-        const auto [it, inserted] = firstInCell.try_emplace(key, pt.ref);
-        if (!inserted && !(it->second == pt.ref)) {
-            unions.emplace_back(it->second, pt.ref);
-        }
-    }
-
-    // Derivacion en T: un punto que cae sobre el cuerpo (interior) de un cable
-    // del que NO es extremo queda unido a la net de ese cable. Un cruce en 4
-    // vias no entra aca (no hay ningun punto de conexion en el cruce), asi que
-    // dos cables que solo se cruzan siguen electricamente separados.
-    constexpr qreal kOnWireTolerance = 1.5;
-    for (const Point& pt : points) {
-        for (const auto& [wireId, wireItem] : wireItems_) {
-            const WireConnection* w = document_->wire(wireId);
-            if (w == nullptr || w->a == pt.ref || w->b == pt.ref) {
-                continue;
-            }
-            const QPointF projection = wireItem->nearestPointOnPath(pt.pos);
-            if (QLineF(projection, pt.pos).length() <= kOnWireTolerance) {
-                unions.emplace_back(pt.ref, w->a);
-            }
-        }
-    }
-    return unions;
-}
 
 } // namespace digitalforge::editor
