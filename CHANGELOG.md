@@ -4,6 +4,22 @@ Todas las versiones publicables de DigitalForge se listan aquí. El formato
 sigue, a grandes rasgos, [Keep a Changelog](https://keepachangelog.com/es/),
 y el versionado es [semántico](https://semver.org/lang/es/).
 
+## v0.1.1 — pre-alpha
+
+### Editor gráfico (Qt6)
+- **Enrutamiento automático de cables con obstáculos**: el trazado ortogonal
+  ahora detecta componentes y otros cables en el camino y los rodea, en vez de
+  cruzarlos en línea recta.
+- Edición interactiva de cables ampliada: arrastre de segmentos y uniones,
+  desplazamiento de los cables junto con la selección múltiple, y
+  sincronización de componentes y cables durante el arrastre.
+- Pines de los componentes centrados de forma uniforme.
+- Corrección: el modo de tema "Sistema" ahora sigue en vivo los cambios de
+  tema claro/oscuro de Windows en vez de quedar congelado en el que estaba
+  activo al arrancar.
+- Gestión de estilos de la aplicación simplificada: se usa directamente el
+  estilo nativo/Fusion estándar de Qt.
+
 ## v0.1.0-alpha — pre-lanzamiento
 
 Primer pre-lanzamiento público (alpha). Editor y simulador de lógica digital

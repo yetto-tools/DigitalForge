@@ -38,3 +38,5 @@ packaging/windows/output/
 packaging/linux/build-dir/
 packaging/linux/.flatpak-builder/
 *.flatpak
+
+build-gui-673/
