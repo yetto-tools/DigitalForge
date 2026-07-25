@@ -4,6 +4,21 @@ Todas las versiones publicables de DigitalForge se listan aquí. El formato
 sigue, a grandes rasgos, [Keep a Changelog](https://keepachangelog.com/es/),
 y el versionado es [semántico](https://semver.org/lang/es/).
 
+## v0.1.4 — pre-alpha
+
+### Correcciones
+- **v0.1.3 tampoco alcanzaba**: exigir version y huella coincidentes antes de
+  restaurar el layout de paneles no evito el mismo crash "aparece el splash
+  y se cierra" en un caso real (mismo instalador, version y huella
+  identicas). La causa exacta de por que restaurar un "MainWindow/state"
+  puntual a veces deja corrupto el auto-hide de paneles no se pudo aislar
+  con certeza; en vez de seguir intentando adivinar cuando es seguro
+  hacerlo, se elimino la unica operacion que alguna vez crasheo: ya no se
+  auto-oculta ningun panel a partir de una sesion anterior (si, tenias
+  paneles colapsados, arrancan pineados y podes volver a ocultarlos con un
+  click). El tamano/posicion de ventana y el resto de la disposicion de
+  docks/toolbars se siguen restaurando con normalidad.
+
 ## v0.1.3 — pre-alpha
 
 ### Correcciones
