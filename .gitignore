@@ -10,7 +10,9 @@ compile_commands.json
 build/
 out/
 build-gui/
+build-gui-673/
 build-linux/
+build-debug/
 # Temporary files
 *.tmp
 *.log
@@ -38,5 +40,3 @@ packaging/windows/output/
 packaging/linux/build-dir/
 packaging/linux/.flatpak-builder/
 *.flatpak
-
-build-gui-673/
