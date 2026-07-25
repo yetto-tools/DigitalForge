@@ -4,6 +4,19 @@ Todas las versiones publicables de DigitalForge se listan aquí. El formato
 sigue, a grandes rasgos, [Keep a Changelog](https://keepachangelog.com/es/),
 y el versionado es [semántico](https://semver.org/lang/es/).
 
+## v0.1.3 — pre-alpha
+
+### Correcciones
+- **v0.1.2 no era suficiente**: la huella de docks/toolbars por si sola no
+  alcanzaba para detectar un `MainWindow/state` guardado por una instalacion
+  anterior (versiones distintas pueden compartir el mismo conjunto de
+  paneles). Ahora se exige tambien que la version que guardo el estado
+  coincida con la actual; si no, se usa la disposicion de fabrica.
+- Instalador de Windows: limpia por completo la carpeta de una instalacion
+  anterior antes de copiar los archivos nuevos, para no dejar restos de
+  versiones previas (DLLs o plugins descontinuados) conviviendo con la
+  instalacion actual.
+
 ## v0.1.2 — pre-alpha
 
 ### Correcciones

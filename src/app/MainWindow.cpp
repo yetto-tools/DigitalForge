@@ -42,6 +42,7 @@
 
 #include "DefaultLayout.hpp"
 #include "UpdateChecker.hpp"
+#include "core/Version.hpp"
 #include "editor/CircuitDocument.hpp"
 #include "editor/CircuitScene.hpp"
 #include "editor/CircuitView.hpp"
@@ -487,22 +488,28 @@ void MainWindow::restoreWindowLayout() {
     // es ilegible (formato viejo, instalacion nueva), la de fabrica.
     //
     // Ademas de vacio/ilegible, un "MainWindow/state" guardado por una
-    // version anterior de la app (con otro conjunto de docks/toolbars, tras
-    // agregar/quitar/renombrar un panel) se descarta comparando la huella
-    // guardada junto a el contra currentDockLayoutFingerprint(): restoreState()
-    // puede devolver true igual con un blob asi (no valida tan estricto), pero
-    // deja el QDockAreaLayout interno de Qt corrupto de un modo que no
-    // crashea ahi mismo sino mas adelante, en cuanto se saca un dock del
-    // layout (auto-hide) - el crash "aparece el splash y se cierra" al
-    // reabrir reportado, reproducido de forma 100% consistente con un blob
-    // viejo en el registro y confirmado ausente al generar uno nuevo con
-    // este mismo build.
+    // instalacion anterior se descarta comparando dos cosas contra lo
+    // guardado junto a el: la huella de docks/toolbars actuales
+    // (currentDockLayoutFingerprint(), por si se agrego/quito/renombro un
+    // panel) y la version exacta de la app que lo escribio. Se exige tambien
+    // la version porque la huella sola no alcanza: un blob guardado por OTRO
+    // binario (otra instalacion, aunque comparta el mismo conjunto de
+    // nombres de dock) puede hacer que restoreState() devuelva true igual
+    // (no valida tan estricto) pero deje el QDockAreaLayout interno de Qt
+    // corrupto de un modo que no crashea ahi mismo sino mas adelante, en
+    // cuanto se saca un dock del layout (auto-hide) - el crash "aparece el
+    // splash y se cierra" al reabrir reportado. Por eso cualquier
+    // actualizacion (instalacion anterior) arranca siempre con la
+    // disposicion de fabrica en vez de arriesgarse a restaurar un blob de
+    // otra version.
     const QSettings settings;
     const QByteArray savedState = settings.value("MainWindow/state").toByteArray();
+    const bool sameVersion =
+        settings.value("MainWindow/layoutVersion").toString() == QString::fromUtf8(core::kDigitalForgeVersion);
     const bool fingerprintMatches =
         settings.value("MainWindow/layoutFingerprint").toStringList() == currentDockLayoutFingerprint();
     QStringList autoHiddenNames;
-    if (!savedState.isEmpty() && fingerprintMatches && restoreState(savedState)) {
+    if (!savedState.isEmpty() && sameVersion && fingerprintMatches && restoreState(savedState)) {
         autoHiddenNames = settings.value("MainWindow/autoHiddenDocks").toStringList();
     } else {
         const QByteArray defaultState = defaults::windowState();
@@ -1357,9 +1364,10 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         windowSettings.setValue("MainWindow/state", saveState());
         windowSettings.setValue("MainWindow/autoHiddenDocks", autoHiddenNames);
         // Ver el comentario en restoreWindowLayout(): permite descartar este
-        // "state" en una sesion futura si el conjunto de docks/toolbars
-        // cambio (version distinta de la app) en vez de restaurarlo corrupto.
+        // "state" en una sesion futura si viene de otra instalacion/version
+        // en vez de restaurarlo potencialmente corrupto.
         windowSettings.setValue("MainWindow/layoutFingerprint", currentDockLayoutFingerprint());
+        windowSettings.setValue("MainWindow/layoutVersion", QString::fromUtf8(core::kDigitalForgeVersion));
         settings_.save();
 
         event->accept();
