@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(DigitalForge
-    VERSION 0.1.1
+    VERSION 0.1.2
     DESCRIPTION "Multiplatform digital logic editor and simulator"
     LANGUAGES CXX
 )

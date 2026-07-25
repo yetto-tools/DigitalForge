@@ -20,7 +20,7 @@ Actions (ver `.github/workflows/release.yml`) al empujar un tag `v*`.
 
 ## Estado del proyecto
 
-Versión actual: **0.1.1** (pre-alpha). El núcleo de simulación y el editor
+Versión actual: **0.1.2** (pre-alpha). El núcleo de simulación y el editor
 gráfico Qt6 funcionan de extremo a extremo: se puede colocar componentes,
 cablearlos, simular y guardar/abrir proyectos.
 

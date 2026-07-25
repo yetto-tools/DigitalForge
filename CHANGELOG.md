@@ -4,6 +4,16 @@ Todas las versiones publicables de DigitalForge se listan aquí. El formato
 sigue, a grandes rasgos, [Keep a Changelog](https://keepachangelog.com/es/),
 y el versionado es [semántico](https://semver.org/lang/es/).
 
+## v0.1.2 — pre-alpha
+
+### Correcciones
+- **Crash al reabrir la app** ("aparece el splash y se cierra"): un
+  `MainWindow/state` guardado por una versión anterior (con otro conjunto de
+  paneles/barras) dejaba corrupto el layout interno de Qt al restaurar los
+  paneles auto-ocultos de la sesión previa. Ahora se guarda una huella de la
+  disposición de paneles/barras junto con el estado, y se descarta el estado
+  guardado (usando la disposición de fábrica) si no coincide con la actual.
+
 ## v0.1.1 — pre-alpha
 
 ### Editor gráfico (Qt6)
