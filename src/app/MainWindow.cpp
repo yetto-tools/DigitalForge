@@ -470,13 +470,40 @@ void MainWindow::applyDefaultWindowGeometry() {
     }
 }
 
+QStringList MainWindow::currentDockLayoutFingerprint() const {
+    QStringList names;
+    for (const QDockWidget* dock : findChildren<QDockWidget*>()) {
+        names << dock->objectName();
+    }
+    for (const QToolBar* toolBar : findChildren<QToolBar*>()) {
+        names << toolBar->objectName();
+    }
+    names.sort();
+    return names;
+}
+
 void MainWindow::restoreWindowLayout() {
     // Disposicion de la sesion anterior; si no hay ninguna guardada o el blob
     // es ilegible (formato viejo, instalacion nueva), la de fabrica.
-    const QByteArray savedState = QSettings().value("MainWindow/state").toByteArray();
+    //
+    // Ademas de vacio/ilegible, un "MainWindow/state" guardado por una
+    // version anterior de la app (con otro conjunto de docks/toolbars, tras
+    // agregar/quitar/renombrar un panel) se descarta comparando la huella
+    // guardada junto a el contra currentDockLayoutFingerprint(): restoreState()
+    // puede devolver true igual con un blob asi (no valida tan estricto), pero
+    // deja el QDockAreaLayout interno de Qt corrupto de un modo que no
+    // crashea ahi mismo sino mas adelante, en cuanto se saca un dock del
+    // layout (auto-hide) - el crash "aparece el splash y se cierra" al
+    // reabrir reportado, reproducido de forma 100% consistente con un blob
+    // viejo en el registro y confirmado ausente al generar uno nuevo con
+    // este mismo build.
+    const QSettings settings;
+    const QByteArray savedState = settings.value("MainWindow/state").toByteArray();
+    const bool fingerprintMatches =
+        settings.value("MainWindow/layoutFingerprint").toStringList() == currentDockLayoutFingerprint();
     QStringList autoHiddenNames;
-    if (!savedState.isEmpty() && restoreState(savedState)) {
-        autoHiddenNames = QSettings().value("MainWindow/autoHiddenDocks").toStringList();
+    if (!savedState.isEmpty() && fingerprintMatches && restoreState(savedState)) {
+        autoHiddenNames = settings.value("MainWindow/autoHiddenDocks").toStringList();
     } else {
         const QByteArray defaultState = defaults::windowState();
         if (!defaultState.isEmpty()) {
@@ -1329,6 +1356,10 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         windowSettings.setValue("MainWindow/geometry", saveGeometry());
         windowSettings.setValue("MainWindow/state", saveState());
         windowSettings.setValue("MainWindow/autoHiddenDocks", autoHiddenNames);
+        // Ver el comentario en restoreWindowLayout(): permite descartar este
+        // "state" en una sesion futura si el conjunto de docks/toolbars
+        // cambio (version distinta de la app) en vez de restaurarlo corrupto.
+        windowSettings.setValue("MainWindow/layoutFingerprint", currentDockLayoutFingerprint());
         settings_.save();
 
         event->accept();

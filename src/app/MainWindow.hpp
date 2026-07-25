@@ -4,6 +4,7 @@
 #include <QMetaObject>
 #include <QPoint>
 #include <QString>
+#include <QStringList>
 
 #include <cstdint>
 #include <map>
@@ -136,6 +137,16 @@ private:
     void restoreWindowLayout();
     // Devuelve la ventana a la disposicion de fabrica, descartando la actual.
     void resetWindowLayout();
+    // Huella de la estructura actual de docks/toolbars (sus objectName(),
+    // ordenados) - ver restoreWindowLayout() y closeEvent(). Un
+    // "MainWindow/state" guardado por una version anterior de la app (con
+    // otro conjunto de paneles/barras) puede diferir de la huella grabada
+    // junto a el; restoreState() puede devolver true igual (no valida tan
+    // estricto) pero deja el QDockAreaLayout interno de Qt corrupto de forma
+    // que crashea en cuanto se saca un dock del layout (auto-hide) mas
+    // adelante - reproducido de forma 100% consistente con un blob viejo,
+    // y confirmado ausente al generar un blob nuevo con este mismo build.
+    [[nodiscard]] QStringList currentDockLayoutFingerprint() const;
     // Arma las dos franjas de auto-hide (izquierda/derecha) que alojan las
     // pestanas verticales de los paneles despineados - ver setupDocks() y
     // makeAutoHideable().
