@@ -34,21 +34,6 @@ constexpr qreal kVertexHitRadius = 6.0;
 // unidad entera ese centro era inalcanzable y el cable entraba corrido al pin.
 constexpr qreal kWireGridSize = ComponentItem::kGridSize / 2.0;
 
-qreal distanceToSegment(QPointF p, QPointF a, QPointF b, QPointF* projectionOut = nullptr) {
-    const QPointF ab = b - a;
-    const qreal lengthSquared = QPointF::dotProduct(ab, ab);
-    QPointF projection = a;
-    if (lengthSquared > 0.0) {
-        qreal t = QPointF::dotProduct(p - a, ab) / lengthSquared;
-        t = std::clamp(t, 0.0, 1.0);
-        projection = a + t * ab;
-    }
-    if (projectionOut != nullptr) {
-        *projectionOut = projection;
-    }
-    return QLineF(p, projection).length();
-}
-
 QPointF maybeSnap(const CircuitScene* scene, QPointF point) {
     if (scene != nullptr && scene->snapToGridEnabled()) {
         return snapToGrid(point, kWireGridSize);
@@ -160,6 +145,8 @@ QPointF WireItem::nearestPointOnPath(QPointF scenePos) const {
     }
     return best;
 }
+
+WireSplit WireItem::splitWaypointsAt(QPointF point) const { return splitWireWaypoints(renderedPolyline(), point); }
 
 QPointF WireItem::endpointHandlePos(bool isA) const {
     const std::vector<QPointF> polyline = renderedPolyline();
@@ -377,7 +364,13 @@ void WireItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
         }
         const WireEndpoint current = isA ? a_ : b_;
         const WireEndpoint other = isA ? b_ : a_;
-        if (!target.has_value() || *target == current || *target == other ||
+        // Un pin ya conectado a OTRO cable tampoco es un destino valido (ver
+        // CircuitDocument::pinHasWire()) -- *target == current/other ya cubre
+        // el caso de que sea un extremo de este mismo cable, asi que si
+        // pinHasWire() da true aca es siempre por un cable distinto.
+        const bool targetPinOccupied =
+            target.has_value() && !target->isJunction && document_->pinHasWire(target->pin());
+        if (!target.has_value() || *target == current || *target == other || targetPinOccupied ||
             !document_->requireEditable(QStringLiteral("reconectar un cable"))) {
             updateGeometry(); // revertir el preview
             return;

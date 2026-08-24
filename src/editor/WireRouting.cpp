@@ -2,9 +2,26 @@
 
 #include <QLineF>
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace digitalforge::editor {
+
+qreal distanceToSegment(QPointF p, QPointF a, QPointF b, QPointF* projectionOut) {
+    const QPointF ab = b - a;
+    const qreal lengthSquared = QPointF::dotProduct(ab, ab);
+    QPointF projection = a;
+    if (lengthSquared > 0.0) {
+        qreal t = QPointF::dotProduct(p - a, ab) / lengthSquared;
+        t = std::clamp(t, 0.0, 1.0);
+        projection = a + t * ab;
+    }
+    if (projectionOut != nullptr) {
+        *projectionOut = projection;
+    }
+    return QLineF(p, projection).length();
+}
 
 std::vector<QPointF> wireVertices(const std::vector<QPointF>& points) {
     if (points.size() < 2) {
@@ -140,14 +157,73 @@ std::vector<QPointF> moveWireSegment(const std::vector<QPointF>& points, std::si
     return simplifyOrthogonalPolyline(result);
 }
 
+namespace {
+
+// Si `value` esta a kCornerAlignSnapTolerance o menos de alguno de los dos
+// candidatos, devuelve ese candidato (el mas cercano de los dos); si no,
+// devuelve `value` sin tocar.
+qreal snapToNearestNeighbor(qreal value, qreal neighborA, qreal neighborB) {
+    const qreal distA = std::abs(value - neighborA);
+    const qreal distB = std::abs(value - neighborB);
+    const qreal bestDist = std::min(distA, distB);
+    if (bestDist > kCornerAlignSnapTolerance) {
+        return value;
+    }
+    return distA <= distB ? neighborA : neighborB;
+}
+
+} // namespace
+
 std::vector<QPointF> moveWireCorner(const std::vector<QPointF>& points, std::size_t cornerIndex,
                                      QPointF cursorPos) {
     if (cornerIndex == 0 || cornerIndex + 1 >= points.size()) {
         return points; // los extremos los ancla su pin/union
     }
+    const QPointF prev = points[cornerIndex - 1];
+    const QPointF next = points[cornerIndex + 1];
+    const QPointF snapped(snapToNearestNeighbor(cursorPos.x(), prev.x(), next.x()),
+                           snapToNearestNeighbor(cursorPos.y(), prev.y(), next.y()));
+
     std::vector<QPointF> result = points;
-    result[cornerIndex] = cursorPos;
+    result[cornerIndex] = snapped;
     return simplifyOrthogonalPolyline(result);
+}
+
+WireSplit splitWireWaypoints(const std::vector<QPointF>& polyline, QPointF splitPoint) {
+    WireSplit result;
+    if (polyline.size() < 2) {
+        return result;
+    }
+    // Mismo criterio de distancia punto-segmento que usa WireItem para hit-
+    // testing: el segmento cuyo punto mas cercano a splitPoint sea el mas
+    // proximo es donde cae el corte.
+    std::size_t bestIndex = 0;
+    qreal bestDistance = std::numeric_limits<qreal>::max();
+    for (std::size_t i = 0; i + 1 < polyline.size(); ++i) {
+        const qreal distance = distanceToSegment(splitPoint, polyline[i], polyline[i + 1]);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            bestIndex = i;
+        }
+    }
+
+    for (std::size_t i = 1; i <= bestIndex; ++i) {
+        result.before.push_back(polyline[i]);
+    }
+    for (std::size_t i = bestIndex + 1; i + 1 < polyline.size(); ++i) {
+        result.after.push_back(polyline[i]);
+    }
+
+    // Si splitPoint cae (casi) exactamente sobre un vertice ya existente, ese
+    // vertice ES el nuevo punto de union: no se lo duplica como ultimo/primer
+    // waypoint de su propio tramo.
+    if (!result.before.empty() && QLineF(result.before.back(), splitPoint).length() <= kWireAlignTolerance) {
+        result.before.pop_back();
+    }
+    if (!result.after.empty() && QLineF(result.after.front(), splitPoint).length() <= kWireAlignTolerance) {
+        result.after.erase(result.after.begin());
+    }
+    return result;
 }
 
 } // namespace digitalforge::editor

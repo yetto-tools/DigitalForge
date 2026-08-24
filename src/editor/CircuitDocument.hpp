@@ -7,6 +7,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <span>
 #include <string>
@@ -110,6 +111,14 @@ struct ComponentPlacement {
     // frente"/"Enviar al fondo"/etc (ver CircuitScene::bringSelectedToFront()
     // y companeros) lo ajustan relativo al resto.
     int zOrder = 0;
+    // Desplazamiento (en el espacio LOCAL del componente, igual que los
+    // pines) de la etiqueta de instancia respecto de su posicion por
+    // defecto (debajo del cuerpo) -- (0,0) es esa posicion por defecto, para
+    // que los proyectos guardados antes de que existiera este campo se vean
+    // identicos. Se arrastra directamente sobre ComponentItem (ver
+    // ComponentItem::mousePressEvent), nunca via SelectionTool -- es un gesto
+    // propio del item, no una reubicacion del componente.
+    QPointF labelOffset{0.0, 0.0};
 };
 
 // Es propietario de cada ComponentInstance colocado y de cada WireConnection
@@ -186,15 +195,21 @@ public:
     // destino (pin o punto de union), sin borrar el otro extremo. Reconstruye
     // el WireItem correspondiente (via wireAboutToBeRemoved + wireAdded, para
     // que la vista tome la nueva ancla) y limpia el punto de union viejo si
-    // quedo huerfano. Devuelve false (sin cambios) si el destino no existe o
-    // dejaria el cable conectado a si mismo. `endIsA` elige cual extremo se
-    // reconecta.
+    // quedo huerfano. Devuelve false (sin cambios) si el destino no existe, ya
+    // tiene otro cable conectado (ver pinHasWire()), o dejaria el cable
+    // conectado a si mismo. `endIsA` elige cual extremo se reconecta.
     bool retargetWire(uint32_t wireId, bool endIsA, WireEndpoint newEndpoint);
 
     [[nodiscard]] const WireConnection* wire(uint32_t wireId) const;
     [[nodiscard]] std::vector<uint32_t> wireIds() const;
     [[nodiscard]] std::vector<WireConnection> wiresAttachedToComponent(uint32_t componentId) const;
-    [[nodiscard]] bool pinHasWire(PinRef pin) const;
+    // Un pin acepta UN SOLO cable conectado directamente -- ramificar desde un
+    // pin requiere pasar por un punto de union (2 o mas cables ahi si).
+    // addWire()/retargetWire() usan esto para rechazar una segunda conexion
+    // directa al mismo pin. `ignoreWireId` excluye ese cable de la busqueda
+    // (retargetWire() lo usa para no chocar contra el propio cable que esta
+    // reconectando).
+    [[nodiscard]] bool pinHasWire(PinRef pin, std::optional<uint32_t> ignoreWireId = std::nullopt) const;
 
     // Punto de union libre: ver el comentario de Junction mas arriba.
     // reserveJunctionId()/addJunctionWithId() siguen el mismo patron de

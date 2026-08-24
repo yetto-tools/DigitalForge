@@ -2,6 +2,8 @@
 
 #include <QPainterPath>
 #include <QRectF>
+#include <QString>
+#include <string>
 
 namespace digitalforge::editor {
 
@@ -53,6 +55,22 @@ enum class MsiShapeKind { Rectangle, FanInTrapezoid, FanOutTrapezoid };
     path.lineTo(rect.left(), y + size / 2.0);
     path.closeSubpath();
     return path;
+}
+
+// Sigla corta para el centro del cuerpo de un bloque memory.* (ver
+// ComponentItem::paintMemory()) o su icono chico de paleta (ver
+// ui::IconFactory::componentIcon()) - el displayName completo ("Flip-Flop
+// D") no entra ni en el cuerpo de 48px ni en un icono de paleta. Cadena
+// vacia para cualquier typeId que no sea uno de los cinco tipos memory.*
+// conocidos (los llamadores caen de vuelta al displayName completo en ese
+// caso).
+[[nodiscard]] inline QString memoryCenterLabel(const std::string& typeId) {
+    if (typeId == "memory.srLatch") return QStringLiteral("SR");
+    if (typeId == "memory.dFlipFlop") return QStringLiteral("D");
+    if (typeId == "memory.jkFlipFlop") return QStringLiteral("JK");
+    if (typeId == "memory.tFlipFlop") return QStringLiteral("T");
+    if (typeId == "memory.register") return QStringLiteral("REG");
+    return QString();
 }
 
 } // namespace digitalforge::editor

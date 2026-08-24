@@ -77,6 +77,29 @@ private:
     QPointF newPosition_;
 };
 
+// Reubica la etiqueta de instancia de un componente (ComponentPlacement::
+// labelOffset) -- lo empuja ComponentItem mismo al final de un arrastre de la
+// etiqueta (ver ComponentItem::mouseReleaseEvent()), nunca SelectionTool: es
+// un gesto propio del item, no una reubicacion del componente entero.
+class SetLabelOffsetCommand : public QUndoCommand {
+public:
+    SetLabelOffsetCommand(CircuitDocument* document, uint32_t componentId, QPointF oldOffset, QPointF newOffset,
+                           QUndoCommand* parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] int id() const override;
+    bool mergeWith(const QUndoCommand* other) override;
+
+private:
+    void apply(QPointF offset);
+
+    CircuitDocument* document_;
+    uint32_t componentId_;
+    QPointF oldOffset_;
+    QPointF newOffset_;
+};
+
 class MoveJunctionCommand : public QUndoCommand {
 public:
     MoveJunctionCommand(CircuitDocument* document, uint32_t junctionId, QPointF oldPosition, QPointF newPosition,
@@ -197,7 +220,13 @@ private:
 // los dos wireId nuevos) en el constructor.
 class SplitWireCommand : public QUndoCommand {
 public:
+    // `waypointsBefore`/`waypointsAfter` son los quiebres que le quedan a cada
+    // segmento nuevo (ver WireItem::splitWaypointsAt()/WireRouting::
+    // splitWireWaypoints()), para que partir un cable en una derivacion en T
+    // no le borre el trazado ya acomodado. Vacios por defecto para el caso
+    // simple (cable recto sin quiebres, o llamador que no los necesita).
     SplitWireCommand(CircuitDocument* document, uint32_t existingWireId, QPointF splitPosition,
+                      std::vector<QPointF> waypointsBefore = {}, std::vector<QPointF> waypointsAfter = {},
                       QUndoCommand* parent = nullptr);
 
     void redo() override;
@@ -210,9 +239,40 @@ private:
     uint32_t originalWireId_;
     WireConnection originalWire_;
     QPointF splitPosition_;
+    std::vector<QPointF> waypointsBefore_;
+    std::vector<QPointF> waypointsAfter_;
     uint32_t junctionId_;
     uint32_t wireId1_;
     uint32_t wireId2_;
+};
+
+// El inverso de SplitWireCommand: reemplaza los dos cables `wire1`/`wire2`
+// que se encuentran en `junctionId` (se asume en grado exactamente 2, sin
+// ninguna otra derivacion) por un unico cable nuevo entre sus otros dos
+// extremos. Sana la fragmentacion que deja un split cuando la derivacion que
+// lo origino se borra despues -- sin esto, el punto de union sobrevive para
+// siempre en grado 2, con su punto visible aunque ya no marque una
+// bifurcacion real (JunctionItem::paint() solo lo oculta en grado <2).
+class MergeJunctionCommand : public QUndoCommand {
+public:
+    // `mergedWaypoints` es el trazado ya resuelto para el cable unico (ver
+    // CircuitScene::mergedWaypointsAcrossJunction(), que concatena los
+    // waypoints de wire1/wire2 en el orden correcto y colapsa el punto de
+    // union si quedo colineal entre sus vecinos).
+    MergeJunctionCommand(CircuitDocument* document, uint32_t junctionId, WireConnection wire1, WireConnection wire2,
+                          std::vector<QPointF> mergedWaypoints, QUndoCommand* parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    CircuitDocument* document_;
+    uint32_t junctionId_;
+    QPointF junctionPosition_;
+    WireConnection wire1_;
+    WireConnection wire2_;
+    std::vector<QPointF> mergedWaypoints_;
+    uint32_t mergedWireId_;
 };
 
 // Cambia los puntos de quiebre presentacionales de un cable (ver

@@ -6,11 +6,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdio>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <stdexcept>
 
 #include <QUndoStack>
 
 #include "editor/CircuitDocument.hpp"
+#include "editor/KarnaughDocument.hpp"
 #include "editor/Project.hpp"
 #include "editor/UndoCommands.hpp"
 #include "formats/ProjectSerializer.hpp"
@@ -226,8 +228,15 @@ TEST_CASE("A multi-document project round-trips through saveToFile/loadFromFile"
     std::remove("Vacio.dfc");
 }
 
-TEST_CASE("Project::loadFromFile treats a legacy single-circuit .dfproj as an anonymous one-document project",
+TEST_CASE("Project::loadFromFile treats a legacy single-circuit .dfproj as a one-document project with a "
+          "known location",
           "[project][compat]") {
+    // No es un manifiesto propio (no hay .dfc separados, el circuito vive
+    // directo en el .dfproj, schema viejo), pero SI tiene una ubicacion
+    // conocida en disco -- filePath() debe reportarla para que Guardar
+    // reescriba ahi mismo en vez de tratar cada guardado como si el
+    // proyecto nunca se hubiera abierto (ver MainWindow::onSave(), que cae a
+    // "Guardar como" cuando filePath() esta vacio).
     constexpr const char* kLegacyPath = "test_project_legacy.dfproj";
     CircuitDocument legacy;
     wireAndGateWithLed(legacy);
@@ -235,11 +244,22 @@ TEST_CASE("Project::loadFromFile treats a legacy single-circuit .dfproj as an an
 
     Project project;
     project.loadFromFile(kLegacyPath);
-    std::remove(kLegacyPath);
 
     CHECK(project.documentIds().size() == 1);
-    CHECK(project.filePath().isEmpty()); // sigue siendo "anonimo": no hay manifiesto .dfproj propio
+    CHECK(project.filePath() == QString(kLegacyPath));
     CHECK(project.document(project.activeDocumentId())->componentIds().size() == 4);
+
+    // Guardar en el mismo path no debe promoverlo a manifiesto (seguiria
+    // siendo el circuito solo) ni crear ningun .dfc adicional al lado.
+    project.document(project.activeDocumentId())->addComponent("io.led");
+    project.saveToFile(project.filePath());
+    CHECK_FALSE(fileExists("test_project_legacy.dfc"));
+
+    Project reloaded;
+    reloaded.loadFromFile(kLegacyPath);
+    CHECK(reloaded.document(reloaded.activeDocumentId())->componentIds().size() == 5);
+
+    std::remove(kLegacyPath);
 }
 
 TEST_CASE("A fresh Project's initial document is the undoGroup's active stack from the start", "[project][undo]") {
@@ -259,4 +279,130 @@ TEST_CASE("A fresh Project's initial document is the undoGroup's active stack fr
                                                                   digitalforge::editor::ComponentPlacement{}));
 
     CHECK(project.undoGroup().activeStack()->canUndo());
+}
+
+TEST_CASE("addKarnaughDocument adds a document distinguishable via documentKind()", "[project][karnaugh]") {
+    Project project;
+    const uint32_t circuitId = project.documentIds().front();
+    const uint32_t karnaughId = project.addKarnaughDocument("MiMapa", 3);
+
+    CHECK(karnaughId != circuitId); // mismo espacio de ids, nunca chocan
+    CHECK(project.documentKind(circuitId) == Project::DocumentKind::Circuit);
+    CHECK(project.documentKind(karnaughId) == Project::DocumentKind::Karnaugh);
+    CHECK(project.karnaughDocumentIds() == std::vector<uint32_t>{karnaughId});
+    CHECK(project.karnaughDocumentName(karnaughId) == QString("MiMapa"));
+    CHECK(project.karnaughDocument(karnaughId)->variableCount() == 3);
+    CHECK(project.hasUnsavedChanges());
+
+    // No participa de activeDocumentId()/activeDocument(): agregar un mapa
+    // de Karnaugh nunca cambia "cual circuito esta activo" (ver el
+    // comentario de Project::addKarnaughDocument()).
+    CHECK(project.activeDocumentId() == circuitId);
+
+    CHECK_THROWS_AS(project.documentKind(999), std::invalid_argument);
+}
+
+TEST_CASE("addKarnaughDocument shares the same name namespace as circuit documents", "[project][karnaugh][uniqueness]") {
+    Project project;
+    project.renameDocument(project.documentIds().front(), "Compartido");
+    CHECK_THROWS_AS(project.addKarnaughDocument("Compartido"), std::invalid_argument);
+    CHECK_THROWS_AS(project.addKarnaughDocument("COMPARTIDO"), std::invalid_argument);
+
+    const uint32_t karnaughId = project.addKarnaughDocument("SoloKarnaugh");
+    CHECK_THROWS_AS(project.addDocument("SoloKarnaugh"), std::invalid_argument);
+    CHECK_THROWS_AS(project.renameDocument(project.documentIds().front(), "SoloKarnaugh"), std::invalid_argument);
+    CHECK_THROWS_AS(project.renameKarnaughDocument(karnaughId, "Compartido"), std::invalid_argument);
+}
+
+TEST_CASE("removeKarnaughDocument removes it without requiring at least one to remain", "[project][karnaugh]") {
+    Project project;
+    const uint32_t id = project.addKarnaughDocument("Temporal");
+    REQUIRE(project.karnaughDocumentIds().size() == 1);
+
+    project.removeKarnaughDocument(id);
+    CHECK(project.karnaughDocumentIds().empty()); // a diferencia de removeDocument(), cero es valido
+    CHECK_THROWS_AS(project.removeKarnaughDocument(id), std::invalid_argument);
+}
+
+TEST_CASE("renameKarnaughDocument updates the display name and emits karnaughDocumentRenamed",
+          "[project][karnaugh]") {
+    Project project;
+    const uint32_t id = project.addKarnaughDocument("Original");
+    int renamedCount = 0;
+    QObject::connect(&project, &Project::karnaughDocumentRenamed, [&](uint32_t renamedId) {
+        ++renamedCount;
+        CHECK(renamedId == id);
+    });
+    project.renameKarnaughDocument(id, "Renombrado");
+    CHECK(project.karnaughDocumentName(id) == QString("Renombrado"));
+    CHECK(renamedCount == 1);
+}
+
+TEST_CASE("A project mixing a circuit and a Karnaugh map round-trips through saveToFile/loadFromFile",
+          "[project][karnaugh][roundtrip]") {
+    constexpr const char* kProjectPath = "test_project_karnaugh_roundtrip.dfproj";
+    {
+        Project project;
+        project.renameDocument(project.documentIds().front(), "Circuito");
+        wireAndGateWithLed(*project.activeDocument());
+
+        const uint32_t karnaughId = project.addKarnaughDocument("Mapa", 3);
+        project.karnaughDocument(karnaughId)->setVariableName(0, "X");
+        project.karnaughDocument(karnaughId)->setCellValue(0, 5, digitalforge::editor::KarnaughCellValue::One);
+
+        project.saveToFile(kProjectPath);
+        CHECK_FALSE(project.hasUnsavedChanges());
+    }
+
+    Project loaded;
+    loaded.loadFromFile(kProjectPath);
+
+    // El circuito sigue siendo el documento activo tras recargar (ver el
+    // comentario de Project::saveToFile() sobre por que los mapas de
+    // Karnaugh siempre van al final del arreglo del manifiesto).
+    CHECK(loaded.documentIds().size() == 1);
+    CHECK(loaded.document(loaded.activeDocumentId())->componentIds().size() == 4);
+
+    REQUIRE(loaded.karnaughDocumentIds().size() == 1);
+    const uint32_t karnaughId = loaded.karnaughDocumentIds().front();
+    CHECK(loaded.karnaughDocumentName(karnaughId) == QString("Mapa"));
+    CHECK(loaded.karnaughDocument(karnaughId)->variableCount() == 3);
+    CHECK(loaded.karnaughDocument(karnaughId)->variableName(0) == QString("X"));
+    CHECK(loaded.karnaughDocument(karnaughId)->cellValue(0, 5) == digitalforge::editor::KarnaughCellValue::One);
+
+    std::remove(kProjectPath);
+    std::remove("Circuito.dfc");
+    std::remove("Mapa.dfk");
+}
+
+TEST_CASE("loadFromFile still loads a manifest with no \"kind\" key exactly as before (backward compatibility)",
+          "[project][karnaugh][compat]") {
+    // Un .dfproj guardado ANTES de que existiera el campo "kind" (todo
+    // proyecto guardado hasta hoy) no lo tiene en absoluto -- debe seguir
+    // cargando cada entrada como circuito, exactamente igual que siempre.
+    constexpr const char* kProjectPath = "test_project_no_kind_field.dfproj";
+    constexpr const char* kDocPath = "test_project_no_kind_field_doc.dfc";
+    {
+        CircuitDocument doc;
+        wireAndGateWithLed(doc);
+        formats::saveProjectToFile(doc, kDocPath);
+    }
+    nlohmann::json manifest;
+    manifest["schemaVersion"] = 1;
+    manifest["projectName"] = "SinKind";
+    manifest["documents"] = nlohmann::json::array();
+    manifest["documents"].push_back({{"name", "SoloDoc"}, {"path", kDocPath}}); // sin "kind"
+    manifest["activeDocument"] = 0;
+    std::ofstream out(kProjectPath, std::ios::trunc);
+    out << manifest.dump(2);
+    out.close();
+
+    Project project;
+    project.loadFromFile(kProjectPath);
+    CHECK(project.documentIds().size() == 1);
+    CHECK(project.karnaughDocumentIds().empty());
+    CHECK(project.document(project.activeDocumentId())->componentIds().size() == 4);
+
+    std::remove(kProjectPath);
+    std::remove(kDocPath);
 }

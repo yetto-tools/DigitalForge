@@ -75,9 +75,10 @@ Aritmetica se componen sobre `gates.*`.
 | Componente | typeId | Estado | Notas |
 |---|---|---|---|
 | Latch SR | `memory.srLatch` | Implementado | Dos `GateType::Nor` cruzados. S=R=1 simultaneo es la combinacion invalida clasica (emerge sola de las ecuaciones). |
-| Flip-Flop D | `memory.dFlipFlop` | Implementado | Usa el nuevo `GateType::DFlipFlop` nativo; expone Q y Qn. |
-| Flip-Flop JK | `memory.jkFlipFlop` | Implementado | Conversion JK->D combinacional realimentando el propio Q (`dEquiv = (J & !Q) \| (!K & Q)`) sobre el mismo `GateType::DFlipFlop`. |
-| Registro | `memory.register` | Implementado | Propiedad `bits` (1-64, reutiliza el patron de Fase 2); un `DFlipFlop` por bit compartiendo un CLK comun. Sin `Qn` por bit. |
+| Flip-Flop D | `memory.dFlipFlop` | Implementado | Usa el nuevo `GateType::DFlipFlop` nativo; expone Q y Q'. Propiedad `asyncPresetClear` (apagada por defecto) agrega pines PRE/CLR asincronicos al final de la lista de pines, con polaridad configurable (`presetClearPolarity`, activo-alto por defecto). |
+| Flip-Flop JK | `memory.jkFlipFlop` | Implementado | Conversion JK->D combinacional realimentando el propio Q (`dEquiv = (J & !Q) \| (!K & Q)`) sobre el mismo `GateType::DFlipFlop`. Mismo `asyncPresetClear`/`presetClearPolarity` opcionales que `memory.dFlipFlop`. |
+| Flip-Flop T | `memory.tFlipFlop` | Implementado | T = JK con J=K=T (reusa `addJkFlipFlopStage`); toggle en cada flanco con T=1, mantiene con T=0. Mismo `asyncPresetClear`/`presetClearPolarity` opcionales - sigue siendo el unico modo de forzar un estado conocido a mitad de una simulacion ya corriendo, ya que a diferencia del D/JK ninguna combinacion de T solo (sin CLK) tiene resultado garantizado por si sola en base al Q previo (ver `GateType::DFlipFlop` en `core/GateType.hpp` sobre el valor inicial de Q). |
+| Registro | `memory.register` | Implementado | Propiedad `bits` (1-64, reutiliza el patron de Fase 2); un `DFlipFlop` por bit compartiendo un CLK comun. Sin `Q'` por bit, sin PRE/CLR. |
 
 ## Fase 4 — Subcircuitos
 
@@ -223,8 +224,17 @@ mismo patron que `GateShapes.hpp`) define las formas compartidas entre
   Demultiplexor: el trapecio espejado, "uno a muchos".
 - Sumador/Restador/Comparador: rectangulo + un glifo vectorial chico
   ("+"/"-"/"=").
-- Flip-Flop D/JK/Registro: rectangulo + muesca triangular de reloj (solo
-  los disparados por flanco - el Latch SR, de nivel, no la tiene).
+- Flip-Flop D/JK/T/Registro: rectangulo + muesca triangular de reloj (solo
+  los disparados por flanco - el Latch SR, de nivel, no la tiene). A
+  diferencia del resto de los bloques MSI, `memory.*` SI rotula sus pines en
+  el lienzo (ver el parrafo "fuera de alcance" mas abajo) y agrega burbuja
+  de negacion sobre Q' (y sobre PRE/CLR cuando su polaridad es activa en
+  bajo), mas un punto de estado en vivo junto al rotulo "Q" con el mismo
+  esquema de color de 5 valores que un LED. El icono de paleta distingue
+  los cinco tipos con una marca vectorial chica (punto/s, circulo hueco o
+  lineas de bus) en vez de texto - `ui::IconFactory` evita `drawText` por
+  el mismo motivo documentado en `wiring.constant` (falla en algunos
+  entornos si se renderiza texto sobre un icono construido tan temprano).
 - Subcircuito: rectangulo con doble contorno (documento embebido).
 
 Ademas, `io.hexDisplay`/`io.ledMatrix`/`io.terminal` (Fase B) pasaron de la
@@ -236,12 +246,13 @@ en `drawSevenSegmentDigit()`/`computeSevenSegmentDigitRect()`), la matriz
 LED dibuja una grilla real de circulos coloreados en vivo, y la terminal
 muestra el caracter ASCII decodificado del byte actual.
 
-**Fuera de alcance, senalado explicitamente**: ningun bloque MSI
-(Plexers/Aritmetica/Memoria/Subcircuitos) muestra el nombre de sus pines en
-el lienzo todavia - el `width_` por defecto (32px) no alcanza para texto
-legible en componentes de hasta 130 pines (p. ej. el sumador de 64 bits);
-requeriria repensar el sizing de `ComponentItem::rebuildPins()`, un cambio
-aparte.
+**Fuera de alcance, senalado explicitamente**: de los bloques MSI, solo
+Plexers/Aritmetica/Subcircuitos siguen sin mostrar el nombre de sus pines en
+el lienzo - el `width_` por defecto (32px) no alcanza para texto legible en
+componentes de hasta 130 pines (p. ej. el sumador de 64 bits); requeriria
+repensar el sizing de `ComponentItem::rebuildPins()`, un cambio aparte.
+Memoria (`memory.*`) ya lo hace, con su propio ancho de 48px (`isMemory` en
+`rebuildPins()`) - ver el parrafo de arriba.
 
 ## Driver BCD y color configurable (E/S)
 
@@ -543,8 +554,8 @@ biestables independientes por paquete) sin duplicarla.
 | 7408 | `ic74ls.quadAnd2` | 4 AND de 2 entradas independientes. |
 | 7432 | `ic74ls.quadOr2` | 4 OR de 2 entradas independientes. |
 | 7486 | `ic74ls.quadXor2` | 4 XOR de 2 entradas independientes. |
-| 7474 | `ic74ls.dualDFlipFlop` | Dos FF D independientes. Sin PRE/CLR (mismo recorte que `memory.dFlipFlop`). |
-| 7476 | `ic74ls.dualJkFlipFlop` | Dos FF JK independientes. Sin PRE/CLR (mismo recorte que `memory.jkFlipFlop`). |
+| 7474 | `ic74ls.dualDFlipFlop` | Dos FF D independientes, cada uno con su propio PR/CLR asincronicos activos en bajo (fijo, sin propiedad de polaridad - fiel al chip real, ver `resolveAsyncPresetClear`). |
+| 7476 | `ic74ls.dualJkFlipFlop` | Dos FF JK independientes, mismo PR/CLR activos en bajo que el 7474. |
 | 7490 | `ic74ls.decadeCounter` | Contador BCD **sincronico** (0-9, envuelve a 0): `D0=NOT(Q0)`, `D1=Q1 XOR (Q0 AND NOT Q3)`, `D2=Q2 XOR (Q0 AND Q1)`, `D3=Q3 XOR ((Q0 AND Q1 AND Q2) OR (Q0 AND Q3))`, ecuaciones verificadas contra el ciclo 0-9 completo tanto a mano como con un test dedicado. `CLR` es sincronico (`D AND NOT(CLR)`, se aplica en el proximo flanco) - no replica las etapas divide-por-2/divide-por-5 cascadeables ni los pines R0(1)/R0(2)/R9(1)/R9(2) del 7490 real (el primitivo `GateType::DFlipFlop` no tiene un tercer pin de clear). |
 | 74151 | `ic74ls.mux8to1` | Mux de 8 lineas + `Strobe` activo en bajo (fuerza `Y=0`/`W=1` si esta en alto) + salida complementaria `W`. |
 | 74138 | `ic74ls.decoder3to8` | Decoder de 8 salidas activas en bajo, habilitado por `G1` (alto) y `G2A`/`G2B` (bajo) - deshabilitado, todas las salidas quedan en alto. |

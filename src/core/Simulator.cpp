@@ -42,6 +42,24 @@ void Simulator::seedSourceGates() {
             case GateType::WeakOne:
                 applyGateOutput(i, LogicValue::One);
                 break;
+            case GateType::DFlipFlop:
+                // Arranca en Zero, no flotante: igual convencion que
+                // wiring.clock (siempre arranca en Zero, ver
+                // CircuitDocument::applyInputInitialValues()) y que otros
+                // simuladores de referencia (Logisim, Proteus), que asumen
+                // un valor de encendido conocido en vez de modelar la
+                // metaestabilidad real del hardware. Sin esto, un flip-flop
+                // JK/T con J=K atados en modo toggle (el armado clasico de
+                // un contador en anillo/asincronico) nunca puede resolver
+                // Q: !Q sobre un Q flotante da X, y X realimentado con X da
+                // X para siempre, sin importar cuantos flancos de reloj se
+                // apliquen - un circuito perfectamente valido quedaba
+                // trabado en X (el defecto reportado). PRE/CLR asincronicos
+                // (ver GateType.hpp) siguen sirviendo para forzar un reset
+                // deliberado a mitad de la simulacion; esto solo cubre el
+                // arranque en frio.
+                applyGateOutput(i, LogicValue::Zero);
+                break;
             default:
                 break;
         }
@@ -135,6 +153,28 @@ bool Simulator::step() {
         // eso es exactamente lo que distingue un flip-flop de un latch
         // transparente. `previousValue` (todavia sin sobrescribir arriba)
         // es el valor de CLK justo antes de este evento.
+        //
+        // PRE (pin 2)/CLR (pin 3) son asincronicos y opcionales (arity 4,
+        // ver isValidInputCount): actuan sobre CUALQUIER evento del gate, no
+        // solo sobre un flanco de CLK, y tienen prioridad sobre el flanco -
+        // asi un flip-flop en PRE/CLR ignora el reloj, igual que el silicio
+        // real. Solo un One limpio cuenta como activo (mismo criterio que
+        // el EN de TriStateBuffer, ver Gate.hpp); Zero/Z/X/Error son
+        // inactivos, lo que deja un pin sin conectar (Z) inerte por
+        // defecto. g.inputCount == 2 dejo la forma historica intacta.
+        if (g.inputCount == 4) {
+            const LogicValue pre = gateInputValues_[g.inputStart + 2];
+            const LogicValue clr = gateInputValues_[g.inputStart + 3];
+            const bool preActive = pre == LogicValue::One;
+            const bool clrActive = clr == LogicValue::One;
+            if (preActive || clrActive) {
+                const LogicValue q = (preActive && clrActive) ? LogicValue::Error
+                                      : preActive              ? LogicValue::One
+                                                                : LogicValue::Zero;
+                applyGateOutput(event.componentId, q);
+                return true;
+            }
+        }
         if (event.inputPin == 1 && event.value == LogicValue::One) {
             const LogicValue d = gateInputValues_[g.inputStart + 0];
             const LogicValue q = (previousValue == LogicValue::Zero)
@@ -151,6 +191,23 @@ bool Simulator::step() {
 }
 
 bool Simulator::runUntilStable(uint64_t maxEvents) {
+    // netToggleCount_ se reinicia al arrancar cada corrida (no en reset(),
+    // que es una vez por sesion): una oscilacion combinacional real genera
+    // su rafaga completa de eventos DENTRO de una unica corrida (un lazo sin
+    // reloj que la frene reprograma el proximo evento de inmediato, sin
+    // esperar a nada externo), asi que el umbral se sigue superando aunque
+    // el contador arranque en 0 cada vez. Un reloj (wiring.clock) o un
+    // contador en anillo de flip-flops encadenados (Q de uno alimentando el
+    // CLK del siguiente), en cambio, solo generan 1-2 eventos por corrida -
+    // cada flanco dispara su propia llamada a runUntilStable() por separado
+    // (ver CircuitDocument::onClockTimeout()) - y sin este reinicio, dejarlo
+    // "Ejecutar" el tiempo suficiente terminaba marcando la net del reloj
+    // como oscilante y la dejaba fijada en Unknown para siempre, aunque el
+    // circuito fuera perfectamente valido (el defecto reportado: con el
+    // periodo por defecto de 1000ms, bastaban unos 32 segundos corriendo
+    // para que el propio reloj quedara en X).
+    std::fill(netToggleCount_.begin(), netToggleCount_.end(), 0);
+
     const uint64_t defaultBudget =
         64ULL * (static_cast<uint64_t>(circuit_.gateCount()) + static_cast<uint64_t>(circuit_.netCount()) + 1ULL) +
         10000ULL;

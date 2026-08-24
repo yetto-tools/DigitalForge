@@ -54,6 +54,17 @@ bool isSameConnectionPoint(const WireGestureEndpoint& a, const WireGestureEndpoi
     return false;
 }
 
+// Un pin acepta un solo cable directo (ver CircuitDocument::pinHasWire()) --
+// ramificar desde un pin ya conectado necesita pasar por un punto de union,
+// asi que terminar ahi es un destino invalido igual que "el mismo punto de
+// partida" (mismo tratamiento visual/de commit en todo este archivo: rojo en
+// el preview, gesto cancelado en vez de intentar una conexion que
+// CircuitDocument igual rechazaria).
+bool isOccupiedPin(const CircuitDocument* document, const WireGestureEndpoint& hit) {
+    return hit.pin != nullptr &&
+           document->pinHasWire(PinRef{hit.pin->componentId(), hit.pin->pinIndex()});
+}
+
 } // namespace
 
 WireTool::WireTool(CircuitScene* scene, CircuitDocument* document, QUndoStack* undoStack)
@@ -190,9 +201,12 @@ void WireTool::press(QGraphicsSceneMouseEvent* event) {
     const QPointF pos = event->scenePos();
 
     if (!drawing_) {
-        // Inicio de un trazado: solo desde un pin/union/cuerpo de cable.
+        // Inicio de un trazado: solo desde un pin/union/cuerpo de cable. Un
+        // pin que ya tiene otro cable tampoco sirve de arranque -- el destino
+        // final quedaria igual de invalido, asi que se rechaza aca de una vez
+        // (mismo criterio que isOccupiedPin() aplica al destino).
         const WireGestureEndpoint start = hitTest(pos);
-        if (start.empty()) {
+        if (start.empty() || isOccupiedPin(document_, start)) {
             return;
         }
         drawing_ = true;
@@ -208,7 +222,7 @@ void WireTool::press(QGraphicsSceneMouseEvent* event) {
     // que caiga sobre un destino valido distinto del inicio, en cuyo caso
     // cierra el cable.
     const WireGestureEndpoint hit = hitTest(pos);
-    if (!hit.empty() && !isSameConnectionPoint(startHit_, hit)) {
+    if (!hit.empty() && !isSameConnectionPoint(startHit_, hit) && !isOccupiedPin(document_, hit)) {
         commitTo(hit, pos);
         return;
     }
@@ -255,11 +269,12 @@ void WireTool::updatePreview(QPointF cursorScenePos) {
 
     // Color del preview segun el destino bajo el cursor: verde si soltar ahi
     // haria una conexion valida, rojo si es un destino invalido (el mismo
-    // punto de partida), gris neutro si todavia no hay destino (vacio/grilla).
+    // punto de partida, o un pin que ya tiene otro cable), gris neutro si
+    // todavia no hay destino (vacio/grilla).
     QPen pen;
     if (end.empty()) {
         pen = QPen(Qt::darkGray, 1, Qt::DashLine);
-    } else if (isSameConnectionPoint(startHit_, end)) {
+    } else if (isSameConnectionPoint(startHit_, end) || isOccupiedPin(document_, end)) {
         pen = QPen(QColor(220, 60, 60), 2, Qt::DashLine);
     } else {
         pen = QPen(QColor(40, 180, 70), 2);
@@ -279,8 +294,8 @@ void WireTool::release(QGraphicsSceneMouseEvent* event) {
     const bool wasDrag = (event->scenePos() - pressPos_).manhattanLength() > 4.0;
     if (isFirstSegment && wasDrag) {
         const WireGestureEndpoint end = hitTest(event->scenePos());
-        if (isSameConnectionPoint(startHit_, end)) {
-            cancel(); // arrastre de vuelta al mismo punto: sin efecto
+        if (isSameConnectionPoint(startHit_, end) || isOccupiedPin(document_, end)) {
+            cancel(); // arrastre de vuelta al mismo punto, o a un pin ya ocupado: sin efecto
         } else {
             // Destino valido, o vacio (se crea un punto de union libre ahi).
             commitTo(end, event->scenePos());
@@ -296,8 +311,8 @@ void WireTool::finishAt(QPointF scenePos) {
         return;
     }
     const WireGestureEndpoint end = hitTest(scenePos);
-    if (isSameConnectionPoint(startHit_, end)) {
-        return; // terminar sobre el mismo punto de partida no es valido
+    if (isSameConnectionPoint(startHit_, end) || isOccupiedPin(document_, end)) {
+        return; // terminar sobre el mismo punto de partida, o un pin ya ocupado, no es valido
     }
     commitTo(end, scenePos); // destino valido o vacio (crea punto de union libre)
 }
@@ -348,7 +363,13 @@ WireEndpoint WireTool::resolveEndpoint(const WireGestureEndpoint& hit) {
     if (hit.junction != nullptr) {
         return WireEndpoint::junction(hit.junction->junctionId());
     }
-    auto* splitCommand = new SplitWireCommand(document_, hit.pendingBranchWire->wireId(), hit.anchorPos);
+    // Preservar el trazado ya acomodado del cable que se esta derivando: sin
+    // esto, SplitWireCommand partia el cable con los dos segmentos rectos
+    // (waypoints vacios), asi que cualquier quiebre que el usuario le hubiera
+    // dado se perdia de golpe al conectarle otro cable por encima.
+    const WireSplit split = hit.pendingBranchWire->splitWaypointsAt(hit.anchorPos);
+    auto* splitCommand = new SplitWireCommand(document_, hit.pendingBranchWire->wireId(), hit.anchorPos,
+                                               split.before, split.after);
     undoStack_->push(splitCommand);
     return WireEndpoint::junction(splitCommand->junctionId());
 }

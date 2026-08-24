@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "CircuitDocument.hpp"
+#include "WireRouting.hpp"
 
 class QUndoStack;
 
@@ -79,6 +80,12 @@ public:
     // para que el punto de union nuevo caiga siempre exactamente sobre la
     // ruta visible del cable, nunca desalineado de ella.
     [[nodiscard]] QPointF nearestPointOnPath(QPointF scenePos) const;
+
+    // Waypoints que deberian quedarle a cada mitad si este cable se parte en
+    // `point` (tipicamente el resultado de nearestPointOnPath()). Usado por
+    // WireTool/SplitWireCommand para que derivar un cable nuevo sobre el
+    // cuerpo de este no le borre el trazado ya acomodado.
+    [[nodiscard]] WireSplit splitWaypointsAt(QPointF point) const;
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override;

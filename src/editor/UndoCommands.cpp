@@ -124,6 +124,39 @@ bool MoveComponentCommand::mergeWith(const QUndoCommand* other) {
     return true;
 }
 
+// --- SetLabelOffsetCommand --------------------------------------------------
+
+SetLabelOffsetCommand::SetLabelOffsetCommand(CircuitDocument* document, uint32_t componentId, QPointF oldOffset,
+                                              QPointF newOffset, QUndoCommand* parent)
+    : QUndoCommand(parent),
+      document_(document),
+      componentId_(componentId),
+      oldOffset_(oldOffset),
+      newOffset_(newOffset) {
+    setText("Mover etiqueta");
+}
+
+void SetLabelOffsetCommand::redo() { apply(newOffset_); }
+
+void SetLabelOffsetCommand::undo() { apply(oldOffset_); }
+
+void SetLabelOffsetCommand::apply(QPointF offset) {
+    ComponentPlacement placement = document_->componentPlacement(componentId_);
+    placement.labelOffset = offset;
+    document_->setComponentPlacement(componentId_, placement);
+}
+
+int SetLabelOffsetCommand::id() const { return 1005; }
+
+bool SetLabelOffsetCommand::mergeWith(const QUndoCommand* other) {
+    const auto* move = dynamic_cast<const SetLabelOffsetCommand*>(other);
+    if (move == nullptr || move->componentId_ != componentId_) {
+        return false;
+    }
+    newOffset_ = move->newOffset_;
+    return true;
+}
+
 // --- MoveJunctionCommand --------------------------------------------------
 
 MoveJunctionCommand::MoveJunctionCommand(CircuitDocument* document, uint32_t junctionId, QPointF oldPosition,
@@ -249,11 +282,14 @@ void DeleteWireCommand::undo() {
 // --- SplitWireCommand --------------------------------------------------
 
 SplitWireCommand::SplitWireCommand(CircuitDocument* document, uint32_t existingWireId, QPointF splitPosition,
+                                    std::vector<QPointF> waypointsBefore, std::vector<QPointF> waypointsAfter,
                                     QUndoCommand* parent)
     : QUndoCommand(parent),
       document_(document),
       originalWireId_(existingWireId),
       splitPosition_(splitPosition),
+      waypointsBefore_(std::move(waypointsBefore)),
+      waypointsAfter_(std::move(waypointsAfter)),
       junctionId_(document->reserveJunctionId()),
       wireId1_(document->reserveWireId()),
       wireId2_(document->reserveWireId()) {
@@ -266,8 +302,10 @@ SplitWireCommand::SplitWireCommand(CircuitDocument* document, uint32_t existingW
 
 void SplitWireCommand::redo() {
     document_->addJunctionWithId(junctionId_, splitPosition_);
-    document_->restoreWire(WireConnection{wireId1_, originalWire_.a, WireEndpoint::junction(junctionId_), {}});
-    document_->restoreWire(WireConnection{wireId2_, WireEndpoint::junction(junctionId_), originalWire_.b, {}});
+    document_->restoreWire(
+        WireConnection{wireId1_, originalWire_.a, WireEndpoint::junction(junctionId_), waypointsBefore_});
+    document_->restoreWire(
+        WireConnection{wireId2_, WireEndpoint::junction(junctionId_), originalWire_.b, waypointsAfter_});
     document_->removeWire(originalWireId_);
 }
 
@@ -275,6 +313,53 @@ void SplitWireCommand::undo() {
     document_->removeWire(wireId2_);
     document_->removeWire(wireId1_); // deja al junction en grado 0 -> se elimina en cascada
     document_->restoreWire(originalWire_);
+}
+
+// --- MergeJunctionCommand --------------------------------------------------
+
+MergeJunctionCommand::MergeJunctionCommand(CircuitDocument* document, uint32_t junctionId, WireConnection wire1,
+                                            WireConnection wire2, std::vector<QPointF> mergedWaypoints,
+                                            QUndoCommand* parent)
+    : QUndoCommand(parent),
+      document_(document),
+      junctionId_(junctionId),
+      junctionPosition_(document->junctionPosition(junctionId)),
+      wire1_(std::move(wire1)),
+      wire2_(std::move(wire2)),
+      mergedWaypoints_(std::move(mergedWaypoints)),
+      mergedWireId_(document->reserveWireId()) {
+    setText("Simplificar union");
+}
+
+void MergeJunctionCommand::redo() {
+    const WireEndpoint junction = WireEndpoint::junction(junctionId_);
+    const WireEndpoint a = (wire1_.a == junction) ? wire1_.b : wire1_.a;
+    const WireEndpoint b = (wire2_.a == junction) ? wire2_.b : wire2_.a;
+    // El cable nuevo se restaura ANTES de borrar wire1_/wire2_ (no despues,
+    // como parecia mas natural) -- si `a` o `b` es a su vez una union que no
+    // tiene NINGUNA otra conexion propia (un punto muerto colgando del lado
+    // que no era la derivacion, sin relacion con junctionId_), borrar
+    // wire1_/wire2_ primero la dejaria en grado 0 y eraseWireCascading() la
+    // eliminaria de junctions_ antes de que el cable nuevo llegara a
+    // referenciarla -- una referencia colgante que rebuildSimulation() no
+    // puede resolver (map::at, el crash reportado al borrar una derivacion
+    // cuyo otro extremo sobreviviente terminaba en una union asi). Con el
+    // cable nuevo ya en pie, esa union queda en grado >=1 durante todo el
+    // proceso.
+    document_->restoreWire(WireConnection{mergedWireId_, a, b, mergedWaypoints_});
+    document_->removeWire(wire1_.id);
+    document_->removeWire(wire2_.id); // deja a junctionId_ en grado 0 -> se elimina en cascada
+}
+
+void MergeJunctionCommand::undo() {
+    // Mismo orden invertido que redo(), por la misma razon: wire1_/wire2_
+    // se restauran ANTES de borrar el cable fusionado, para que una union
+    // del otro lado que dependiera solo de ese cable fusionado no quede en
+    // grado 0 a mitad de camino.
+    document_->addJunctionWithId(junctionId_, junctionPosition_);
+    document_->restoreWire(wire1_);
+    document_->restoreWire(wire2_);
+    document_->removeWire(mergedWireId_);
 }
 
 // --- SetWireWaypointsCommand --------------------------------------------------

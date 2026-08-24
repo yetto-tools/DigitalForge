@@ -76,6 +76,17 @@ struct HexDisplayState {
 [[nodiscard]] HexDisplayState hexDisplayState(const ComponentInstance& display, core::LogicValue bit0,
                                                core::LogicValue bit1, core::LogicValue bit2, core::LogicValue bit3);
 
+// True si la propiedad "bitOrder" de una io.hexDisplay pide bit3 (MSB) en el
+// primer pin y bit0 (LSB) en el ultimo, en vez del orden por defecto
+// (bit0..bit3, LSB primero). No cambia el valor decodificado -- ver
+// hexDisplayState() -- solo que pin fisico corresponde a cada bit; quien
+// arma la lista de pines (ComponentDefinition::derivePins) y quien lee sus
+// valores para decodificar (editor::ComponentItem::paintHexDisplay) deben
+// coincidir en este orden. Tolera mapas sin la propiedad "bitOrder"
+// (proyectos guardados antes de que existiera), en cuyo caso es LSB primero.
+[[nodiscard]] bool hexDisplayIsMsbFirst(const PropertyMap& properties);
+[[nodiscard]] bool hexDisplayIsMsbFirst(const ComponentInstance& display);
+
 // Lado maximo de una io.ledMatrix con conexion directa (un pin por celda):
 // mas alla de 8x8 la cantidad de pines deja de ser manejable a mano. La
 // variante multiplexada no tiene este limite porque usa filas+columnas pines.

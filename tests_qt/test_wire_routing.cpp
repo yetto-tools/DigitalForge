@@ -12,7 +12,9 @@ using digitalforge::editor::kWireAlignTolerance;
 using digitalforge::editor::moveWireCorner;
 using digitalforge::editor::moveWireSegment;
 using digitalforge::editor::simplifyOrthogonalPolyline;
+using digitalforge::editor::splitWireWaypoints;
 using digitalforge::editor::wireVertices;
+using digitalforge::editor::WireSplit;
 
 namespace {
 
@@ -189,6 +191,40 @@ TEST_CASE("moveWireCorner moves the corner and leaves both arms orthogonal", "[e
     CHECK(allSegmentsOrthogonal(wireVertices(moved)));
 }
 
+TEST_CASE("moveWireCorner snaps onto a neighbor's axis when the cursor lands close enough",
+          "[editor][wireRouting]") {
+    // Regresion del defecto reportado: alinear una esquina "a ojo" con el
+    // resto del trazado casi nunca cae exacto, y el resto de kWireAlignTolerance
+    // (3px) es demasiado chico para un arrastre a mano -- quedaba un codo
+    // residual en vez de fundirse en un tramo recto.
+    const std::vector<QPointF> points{{0.0, 0.0}, {50.0, 0.0}, {50.0, 50.0}, {120.0, 50.0}};
+    // El cursor pasa a 4px de la x de un vecino (50.0, compartida por ambos):
+    // debe engancharse ahi exacto, dejando ese brazo perfectamente vertical.
+    const std::vector<QPointF> moved = moveWireCorner(points, 1, QPointF(54.0, 30.0));
+    REQUIRE(moved.size() == 4);
+    CHECK(moved[1] == QPointF(50.0, 30.0));
+}
+
+TEST_CASE("moveWireCorner leaves the cursor untouched past the snap tolerance", "[editor][wireRouting]") {
+    const std::vector<QPointF> points{{0.0, 0.0}, {50.0, 0.0}, {50.0, 50.0}, {120.0, 50.0}};
+    const std::vector<QPointF> moved = moveWireCorner(points, 1, QPointF(70.0, 30.0)); // 20px de cualquier vecino
+    REQUIRE(moved.size() == 4);
+    CHECK(moved[1] == QPointF(70.0, 30.0));
+}
+
+TEST_CASE("moveWireCorner can collapse the corner entirely via snapping on both axes", "[editor][wireRouting]") {
+    // Si el cursor cae cerca de la x Y de la y del mismo vecino a la vez, la
+    // esquina se engancha en ambos ejes y termina exactamente sobre ese
+    // vecino -- simplifyOrthogonalPolyline() la funde como duplicado, asi
+    // que la esquina desaparece: el tramo queda derecho de punta a punta en
+    // vez de con un codo residual de un par de pixeles.
+    const std::vector<QPointF> points{{0.0, 0.0}, {50.0, 0.0}, {50.0, 50.0}};
+    const std::vector<QPointF> moved = moveWireCorner(points, 1, QPointF(48.0, 47.0));
+    REQUIRE(moved.size() == 2);
+    CHECK(moved.front() == QPointF(0.0, 0.0));
+    CHECK(moved.back() == QPointF(50.0, 50.0));
+}
+
 TEST_CASE("moveWireCorner refuses to move an endpoint", "[editor][wireRouting]") {
     // Los extremos los ancla su pin/union: no son esquinas arrastrables.
     const std::vector<QPointF> points{{0.0, 0.0}, {50.0, 0.0}, {50.0, 50.0}};
@@ -217,4 +253,40 @@ TEST_CASE("simplifyOrthogonalPolyline always keeps both endpoints", "[editor][wi
     REQUIRE(simplified.size() == 2);
     CHECK(simplified.front() == QPointF(0.0, 0.0));
     CHECK(simplified.back() == QPointF(80.0, 0.0));
+}
+
+TEST_CASE("splitWireWaypoints keeps both halves empty for a plain straight wire",
+          "[editor][wireRouting][splitWire]") {
+    // Regresion del bug reportado: derivar un cable nuevo sobre el cuerpo de
+    // uno sin quiebres no debe inventarle ninguno a ninguna de las mitades.
+    const std::vector<QPointF> polyline = wireVertices({{0.0, 0.0}, {200.0, 0.0}});
+    const WireSplit split = splitWireWaypoints(polyline, QPointF(80.0, 0.0));
+    CHECK(split.before.empty());
+    CHECK(split.after.empty());
+}
+
+TEST_CASE("splitWireWaypoints preserves the corners on each side of the cut", "[editor][wireRouting][splitWire]") {
+    // Un cable en escalera: A(0,0) -> (60,0) -> (60,40) -> B(120,40). Cortar en
+    // el segundo tramo (el vertical) no debe perder el codo del primer tramo
+    // ni el del ultimo.
+    const std::vector<QPointF> polyline{{0.0, 0.0}, {60.0, 0.0}, {60.0, 40.0}, {120.0, 40.0}};
+    const WireSplit split = splitWireWaypoints(polyline, QPointF(60.0, 20.0));
+
+    REQUIRE(split.before.size() == 1);
+    CHECK(split.before[0] == QPointF(60.0, 0.0));
+    REQUIRE(split.after.size() == 1);
+    CHECK(split.after[0] == QPointF(60.0, 40.0));
+}
+
+TEST_CASE("splitWireWaypoints does not duplicate a vertex the cut lands exactly on",
+          "[editor][wireRouting][splitWire]") {
+    // Si el corte cae justo sobre un codo ya existente, ese codo ES el nuevo
+    // punto de union: no debe quedar repetido como ultimo/primer waypoint de
+    // su propia mitad.
+    const std::vector<QPointF> polyline{{0.0, 0.0}, {60.0, 0.0}, {60.0, 40.0}, {120.0, 40.0}};
+    const WireSplit split = splitWireWaypoints(polyline, QPointF(60.0, 0.0));
+
+    CHECK(split.before.empty());
+    REQUIRE(split.after.size() == 1);
+    CHECK(split.after[0] == QPointF(60.0, 40.0));
 }

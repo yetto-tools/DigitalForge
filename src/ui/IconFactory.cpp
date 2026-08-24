@@ -674,11 +674,42 @@ QIcon componentIcon(const components::ComponentDefinition& definition) {
         painter.setPen(QPen(inkColor(), 1.2));
         painter.setBrush(paperColor());
         painter.drawPath(editor::buildMsiShapePath(editor::MsiShapeKind::Rectangle, rect));
-        const bool edgeTriggered = typeId == "memory.dFlipFlop" || typeId == "memory.jkFlipFlop" || typeId == "memory.register";
+        const bool edgeTriggered = typeId == "memory.dFlipFlop" || typeId == "memory.jkFlipFlop" ||
+                                    typeId == "memory.tFlipFlop" || typeId == "memory.register";
         if (edgeTriggered) {
             painter.setPen(Qt::NoPen);
             painter.setBrush(inkColor());
             painter.drawPath(editor::buildClockTrianglePath(rect, rect.bottom() - 3.0, 4.0));
+        }
+        // Los cinco tipos ya no comparten el mismo rectangulo mudo: una marca
+        // chica en la esquina superior izquierda del cuerpo los distingue de
+        // un vistazo. Sin texto (ver el comentario de wiring.constant mas
+        // arriba: drawText sobre un icono construido tan temprano puede
+        // fallar en algunos entornos) - solo primitivas vectoriales, igual
+        // criterio que el resto de este archivo.
+        painter.setPen(QPen(inkColor(), 1.2));
+        painter.setBrush(inkColor());
+        if (typeId == "memory.dFlipFlop") {
+            // D: una unica entrada de dato -> un punto relleno.
+            painter.drawEllipse(QPointF(rect.left() + 3.0, rect.top() + 3.0), 1.2, 1.2);
+        } else if (typeId == "memory.jkFlipFlop" || typeId == "memory.srLatch") {
+            // JK/SR: dos entradas de control -> dos puntos rellenos (el
+            // latch SR ya se distingue del JK por no tener la muesca de
+            // reloj de arriba).
+            painter.drawEllipse(QPointF(rect.left() + 3.0, rect.top() + 2.0), 1.2, 1.2);
+            painter.drawEllipse(QPointF(rect.left() + 3.0, rect.top() + 5.0), 1.2, 1.2);
+        } else if (typeId == "memory.tFlipFlop") {
+            // T (toggle): un circulo hueco, para no confundirlo con los
+            // puntos rellenos de D/JK/SR.
+            painter.setBrush(Qt::NoBrush);
+            painter.drawEllipse(QPointF(rect.left() + 3.0, rect.top() + 3.5), 1.6, 1.6);
+        } else if (typeId == "memory.register") {
+            // Registro: multiples bits -> tres lineas verticales cortas
+            // (bus), en vez de un unico punto.
+            for (int i = 0; i < 3; ++i) {
+                const qreal x = rect.left() + 2.0 + static_cast<qreal>(i) * 2.0;
+                painter.drawLine(QLineF(x, rect.top() + 1.5, x, rect.top() + 5.5));
+            }
         }
     } else if (typeId == "structural.subcircuit") {
         const QRectF rect(2, 3, 16, 14);

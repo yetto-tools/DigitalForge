@@ -24,7 +24,8 @@ enum class GateType : uint8_t {
     Nor,             // >= 2 entradas
     Xor,             // >= 2 entradas
     Xnor,            // >= 2 entradas
-    DFlipFlop,       // 2 entradas fijas: D (pin 0), CLK (pin 1); con estado propio
+    DFlipFlop,       // 2 o 4 entradas: D (pin 0), CLK (pin 1), y opcionalmente PRE (pin 2)/
+                     // CLR (pin 3) asincronicos, activos en alto; con estado propio
     TriStateBuffer,  // 2 entradas fijas: D (pin 0), EN (pin 1); combinacional puro
     WeakZero,        // fuente debil, 0 entradas (resistencia pull-down)
     WeakOne,         // fuente debil, 0 entradas (resistencia pull-up)
@@ -76,7 +77,9 @@ enum class GateType : uint8_t {
         return inputCount >= 2;
     }
     if (isStatefulType(type)) {
-        return inputCount == 2;
+        // 2 = solo D/CLK (forma historica); 4 = D/CLK/PRE/CLR (preset/clear
+        // asincronicos opcionales, ver el comentario de DFlipFlop arriba).
+        return inputCount == 2 || inputCount == 4;
     }
     if (type == GateType::TriStateBuffer) {
         return inputCount == 2;

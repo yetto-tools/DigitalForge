@@ -26,10 +26,23 @@ class ProjectTree : public QWidget {
 public:
     explicit ProjectTree(editor::Project* project, QWidget* parent = nullptr);
 
-    // Expuesto para que MainWindow pueda ofrecer "Nuevo documento" desde el
-    // menu Archivo, ademas del menu contextual de este arbol - misma
-    // operacion, dos formas de invocarla.
+    // Expuesto para que MainWindow pueda ofrecer "Nuevo documento"/"Nuevo
+    // mapa de Karnaugh" desde el menu Archivo, ademas del menu contextual
+    // de este arbol - misma operacion, dos formas de invocarla.
     void addNewDocument();
+    void addNewKarnaughDocument();
+    void addNewTruthTableDocument();
+
+signals:
+    // Un mapa de Karnaugh no tiene "documento activo" en editor::Project
+    // (ver el comentario junto a Project::addKarnaughDocument()) -- a
+    // diferencia de un circuito, que se activa via
+    // project_->setActiveDocument() directo desde onItemClicked(), un clic
+    // sobre un item de mapa de Karnaugh emite esto en cambio, para que
+    // MainWindow (el unico que sabe de pestanas) decida que hacer.
+    void karnaughDocumentActivationRequested(uint32_t id);
+    // Mirror de la de arriba, para una tabla de verdad.
+    void truthTableDocumentActivationRequested(uint32_t id);
 
 protected:
     // Intercepta F2 sobre tree_ (instalado como event filter) para
@@ -46,6 +59,11 @@ private slots:
 private:
     void importDocument();
     void exportDocument(uint32_t id);
+    // Las dos de abajo actuan sobre CUALQUIERA de los tres tipos de
+    // documento -- consultan project_->documentKind(id) internamente y
+    // llaman al metodo de Project que corresponda, para que
+    // onItemClicked()/el menu contextual/F2 no necesiten saber que tipo de
+    // item tienen enfrente.
     void renameDocument(uint32_t id, QTreeWidgetItem* item);
     void removeDocument(uint32_t id);
 

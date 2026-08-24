@@ -54,6 +54,12 @@ public:
     void cancelPlacement();
 
     [[nodiscard]] ComponentItem* componentItem(uint32_t componentId) const;
+    // Componente cuya etiqueta de instancia (arrastrable, ver
+    // ComponentItem::labelHitTest()) cae bajo scenePos, si lo hay -- una
+    // busqueda manual aparte porque QGraphicsScene::items()/itemAt() usan
+    // shape() para el hit-testing, y ComponentItem::shape() excluye a
+    // proposito esa franja (ver su comentario).
+    [[nodiscard]] ComponentItem* componentWithLabelAt(QPointF scenePos) const;
     [[nodiscard]] JunctionItem* junctionItem(uint32_t junctionId) const;
     [[nodiscard]] WireItem* wireItem(uint32_t wireId) const;
     [[nodiscard]] PinItem* pinItemAt(QPointF scenePos) const;
@@ -145,6 +151,20 @@ private:
     // simple mientras la simulacion esta en ejecucion.
     bool tryToggleInput(QPointF scenePos);
 
+    // Posicion de escena de un extremo de cable (pin de componente o punto de
+    // union), resuelta desde los items graficos vivos -- usado solo para
+    // reconstruir el trazado al fusionar dos cables (ver
+    // mergedWaypointsAcrossJunction()).
+    [[nodiscard]] QPointF endpointScenePosition(const WireEndpoint& endpoint) const;
+    // El trazado que deberia tener el cable unico que resulta de fusionar
+    // `w1`/`w2` en `junctionId` (que se asume en grado exactamente 2, sin
+    // otra derivacion) -- concatena sus waypoints en el orden que sale del
+    // punto de union, y simplifica el punto de union si quedo colineal entre
+    // sus vecinos (el caso comun: la derivacion que motivo el split ya se
+    // borro, asi que las dos mitades vuelven a ser un tramo recto).
+    [[nodiscard]] std::vector<QPointF> mergedWaypointsAcrossJunction(uint32_t junctionId, const WireConnection& w1,
+                                                                      const WireConnection& w2) const;
+
     CircuitDocument* document_;
     QUndoStack* undoStack_;
     EditorMode mode_ = EditorMode::Selection;
@@ -156,6 +176,15 @@ private:
     // alternar un wiring.input con un solo clic (mientras la simulacion esta
     // en ejecucion) no interfiera con mover el componente.
     QPointF pressScenePos_;
+
+    // Estado de un arrastre de etiqueta en curso -- ver mousePressEvent()/
+    // mouseMoveEvent()/mouseReleaseEvent(). nullptr = ningun arrastre en
+    // curso. labelDragStartLocalPos_ esta en el espacio local de
+    // labelDragTarget_ (mapFromScene()), para que el gesto se sienta natural
+    // sin importar la rotacion del componente.
+    ComponentItem* labelDragTarget_ = nullptr;
+    QPointF labelDragStartOffset_;
+    QPointF labelDragStartLocalPos_;
 
     std::map<uint32_t, ComponentItem*> componentItems_;
     std::map<uint32_t, WireItem*> wireItems_;

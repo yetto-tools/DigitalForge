@@ -5,6 +5,7 @@
 #include <QPainterPath>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "components/ComponentInstance.hpp"
@@ -22,8 +23,8 @@ class WireItem;
 // en el momento de pintar y nunca evalua ninguna logica por si mismo. La
 // posicion/rotacion las aplica CircuitScene en respuesta a
 // CircuitDocument::componentPlacementChanged; este item nunca apila comandos
-// de undo por su cuenta (lo hace SelectionTool, comparando posiciones a lo
-// largo de un gesto de arrastre).
+// de undo por su cuenta (lo hace SelectionTool/CircuitScene, comparando
+// posiciones/offsets a lo largo de un gesto de arrastre).
 class ComponentItem : public QGraphicsItem {
 public:
     ComponentItem(CircuitDocument* document, uint32_t componentId, QGraphicsItem* parent = nullptr);
@@ -57,6 +58,23 @@ public:
     void removeAttachedWire(WireItem* wire);
     [[nodiscard]] const std::vector<WireItem*>& attachedWires() const noexcept { return attachedWires_; }
 
+    // Estas tres son para el arrastre de la etiqueta de instancia, que
+    // maneja CircuitScene directamente (no llega como evento de mouse normal
+    // del item: shape() excluye a proposito la franja de la etiqueta -- ver
+    // el comentario de shape() mas abajo -- asi que Qt nunca la entrega
+    // aca). labelHitTest() usa mapFromScene() en cambio de shape()/contains()
+    // para no reabrir ese bug.
+    [[nodiscard]] bool labelHitTest(QPointF scenePos) const;
+    // El labelOffset ya confirmado en el documento (ignora cualquier
+    // arrastre en vivo) -- lo que CircuitScene debe guardar como punto de
+    // partida al iniciar un gesto, igual que SelectionTool con la posicion.
+    [[nodiscard]] QPointF labelOffset() const;
+    // Desplazamiento transitorio (no persistido) mientras dura un arrastre;
+    // std::nullopt = sin arrastre en curso (se usa el ya guardado). El
+    // commit real a CircuitDocument (via SetLabelOffsetCommand) lo hace
+    // CircuitScene al soltar.
+    void setLiveLabelOffset(std::optional<QPointF> offset);
+
     // Multiplo de 8 a proposito: width_/pinPitch de cada tipo de componente
     // tambien se eligen como multiplos de 8 (ver ComponentItem::rebuildPins),
     // para que sus bordes y pines siempre caigan sobre esta grilla sin
@@ -67,6 +85,17 @@ protected:
     QVariant itemChange(GraphicsItemChange change, const QVariant& value) override;
 
 private:
+    // Rectangulo de la etiqueta en su posicion POR DEFECTO (labelOffset
+    // (0,0)), en el espacio local del item -- el mismo que boundingRect()
+    // reserva y que paint() usaba antes de que la etiqueta se pudiera
+    // arrastrar. mismo tamano siempre; solo se traslada por el offset
+    // efectivo (ver effectiveLabelOffset()).
+    [[nodiscard]] QRectF labelBaseRect() const;
+    // labelOffset vigente: el que se esta arrastrando en vivo si hay un
+    // gesto en curso (liveLabelOffset_), o si no el ya guardado en el
+    // documento (ComponentPlacement::labelOffset).
+    [[nodiscard]] QPointF effectiveLabelOffset() const;
+
     void paintGeneric(QPainter* painter, bool selected);
     void paintGate(QPainter* painter, bool selected);
     void paintInput(QPainter* painter, bool selected);
@@ -125,6 +154,10 @@ private:
     std::vector<qreal> matrixPersistence_;
     QElapsedTimer matrixPersistenceClock_;
     qint64 matrixPersistenceLastMs_ = 0;
+
+    // Ver setLiveLabelOffset(): vive aparte del documento mientras dura el
+    // arrastre de la etiqueta (igual que WireItem::liveWaypointOffset_).
+    std::optional<QPointF> liveLabelOffset_;
 };
 
 } // namespace digitalforge::editor

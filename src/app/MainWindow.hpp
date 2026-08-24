@@ -23,22 +23,27 @@ class QDockWidget;
 class QMenu;
 class QTabBar;
 class QToolBar;
+class QStackedWidget;
 
 namespace digitalforge::editor {
 class CircuitDocument;
 class CircuitScene;
 class CircuitView;
+class KarnaughDocument;
+class TruthTableDocument;
 class Project;
 } // namespace digitalforge::editor
 
 namespace digitalforge::ui {
 class AutoHideStrip;
 class ComponentPalette;
+class KarnaughMapView;
 class MiniMapView;
 class ProjectTree;
 class PropertyInspector;
 class SimulationToolbar;
 class TruthTablePanel;
+class TruthTableView;
 class WaveformPanel;
 class ZoomControl;
 } // namespace digitalforge::ui
@@ -87,6 +92,23 @@ private slots:
     void onDocumentAboutToBeRemoved(uint32_t id);
     void onActiveDocumentChanged(uint32_t id);
     void onDocumentRenamed(uint32_t id);
+    // Mirror de los cuatro de arriba, para los mapas de Karnaugh del
+    // proyecto (ver editor::Project::karnaughDocumentAdded y companeros) --
+    // karnaughViews_ es a KarnaughMapView lo que scenes_ es a CircuitScene.
+    void onKarnaughDocumentAdded(uint32_t id);
+    void onKarnaughDocumentAboutToBeRemoved(uint32_t id);
+    void onKarnaughDocumentRenamed(uint32_t id);
+    // Un mapa de Karnaugh no participa de activeDocumentChanged (no tiene
+    // "documento activo" en Project) -- ui::ProjectTree emite esto en su
+    // lugar cuando el usuario hace clic sobre uno en el arbol.
+    void onKarnaughDocumentActivationRequested(uint32_t id);
+    // Mirror de los cuatro de arriba, para las tablas de verdad del
+    // proyecto -- truthTableViews_ es a ui::TruthTableView lo que
+    // karnaughViews_ es a ui::KarnaughMapView.
+    void onTruthTableDocumentAdded(uint32_t id);
+    void onTruthTableDocumentAboutToBeRemoved(uint32_t id);
+    void onTruthTableDocumentRenamed(uint32_t id);
+    void onTruthTableDocumentActivationRequested(uint32_t id);
     void onAbout();
     // Chequeo manual de actualizaciones (menu Ayuda): a diferencia del
     // automatico al arrancar, este si avisa cuando ya estas al dia o cuando
@@ -215,8 +237,24 @@ private:
     // tenia pestana (p. ej. se lo selecciono desde ui::ProjectTree estando
     // "cerrado").
     void addDocumentTab(uint32_t id);
+    // Mirror de addDocumentTab() para un mapa de Karnaugh: crea (si hace
+    // falta) su ui::KarnaughMapView/pagina en centralStack_/pestana, y la
+    // selecciona. Usado por onKarnaughDocumentAdded() y por
+    // onKarnaughDocumentActivationRequested().
+    void addKarnaughDocumentTab(uint32_t id);
+    // Mirror de addKarnaughDocumentTab() para una tabla de verdad.
+    void addTruthTableDocumentTab(uint32_t id);
     // -1 si `id` no tiene ninguna pestana abierta actualmente.
     [[nodiscard]] int tabIndexForDocument(uint32_t id) const;
+    // Habilita/deshabilita el menu Editar y gridAction_/snapAction_
+    // mientras una pestana de mapa de Karnaugh esta al frente (no hay
+    // ningun CircuitScene visible al que aplicarles nada en ese estado) --
+    // ver onDocumentTabChanged(). Evita tener que revisar uno por uno los
+    // ~15 lugares que llaman activeScene() (la mayoria son acciones de
+    // menu/barra alcanzables solo a traves de estas, o el menu contextual
+    // de CircuitScene, que de por si no puede dispararse mientras el
+    // lienzo no esta a la vista).
+    void setCircuitEditingEnabled(bool enabled);
 
     [[nodiscard]] editor::CircuitScene* activeScene() const;
 
@@ -233,10 +271,21 @@ private:
     QMetaObject::Connection editBlockedConnection_;
 
     editor::CircuitView* view_ = nullptr;
+    // Pagina 0 de centralStack_ (ver setupCentralWidgets()): el mismo
+    // QGraphicsView compartido de siempre, cuya escena se sigue
+    // reapuntando via view_->setScene() exactamente igual que antes. Cada
+    // mapa de Karnaugh abierto agrega su propia pagina aparte (ver
+    // karnaughViews_) - onDocumentTabChanged() decide cual mostrar segun
+    // el tipo de la pestana activa (editor::Project::documentKind()).
+    QStackedWidget* centralStack_ = nullptr;
+    std::map<uint32_t, ui::KarnaughMapView*> karnaughViews_; // Qt-parented (this); ver onKarnaughDocumentAdded/AboutToBeRemoved
+    std::map<uint32_t, ui::TruthTableView*> truthTableViews_; // Qt-parented (this); ver onTruthTableDocumentAdded/AboutToBeRemoved
     // Pestanas estilo Visual Studio arriba de view_ (ver
     // setupCentralWidgets()). El id de documento de cada pestana se guarda
     // via QTabBar::setTabData(); no todo documento del proyecto tiene
-    // necesariamente una pestana (cerrarla no lo saca del proyecto).
+    // necesariamente una pestana (cerrarla no lo saca del proyecto). Un
+    // mismo QTabBar aloja tanto pestanas de circuito como de mapa de
+    // Karnaugh (comparten espacio de ids, ver Project::DocumentKind).
     QTabBar* documentTabBar_ = nullptr;
     ui::ComponentPalette* palette_ = nullptr;
     // Guardado para poder ofrecer "Nuevo documento" desde el menu Archivo
@@ -311,6 +360,9 @@ private:
     ui::ZoomControl* zoomControl_ = nullptr;
     QAction* gridAction_ = nullptr;
     QAction* snapAction_ = nullptr;
+    // Guardado para poder deshabilitarlo entero mientras una pestana de
+    // mapa de Karnaugh esta al frente - ver setCircuitEditingEnabled().
+    QMenu* editMenu_ = nullptr;
 
     // Submenu "Abrir recientes" (ver rebuildRecentFilesMenu()) - creado una
     // vez en setupMenusAndToolbars(), sus acciones se reconstruyen enteras

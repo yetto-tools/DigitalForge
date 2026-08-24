@@ -638,11 +638,16 @@ void ComponentItem::rebuildPins() {
     // cercana a 1:1 en el caso mas comun (1-2 pines) - a 64 de ancho quedaba
     // muy alargado a lo horizontal.
     // ic74ls.* necesita mas ancho que el generico: a diferencia de
-    // Plexers/Aritmetica/Memoria (sin etiquetas de pin, fuera de alcance
-    // por ahora - ver docs/component-status.md), paintIc74ls() si dibuja el
-    // nombre de cada pin (entrada a la izquierda, salida a la derecha), y
-    // 32px no alcanza para texto legible en ambos lados.
+    // Plexers/Aritmetica (sin etiquetas de pin, fuera de alcance por ahora -
+    // ver docs/component-status.md), paintIc74ls() si dibuja el nombre de
+    // cada pin (entrada a la izquierda, salida a la derecha), y 32px no
+    // alcanza para texto legible en ambos lados.
     const bool isIc74ls = instance->typeId().rfind("ic74ls.", 0) == 0;
+    // memory.* (paintMemory()) tambien rotula sus pines ahora (D/CLK/Q/Q',
+    // etc.) y agrega una burbuja de negacion sobre Q'/PRE/CLR cuando
+    // corresponde - 32px alcanzaba para el rectangulo mudo de antes, pero
+    // no para eso.
+    const bool isMemory = instance->typeId().rfind("memory.", 0) == 0;
     // Secuencia fisica real del DIP (ver ComponentDefinition::
     // physicalPinout), partida en las dos columnas visuales top-a-bottom:
     // izquierda tal cual (pin1 arriba), derecha invertida (el DIP la
@@ -687,7 +692,7 @@ void ComponentItem::rebuildPins() {
     // isMosLike usa un poco mas de ancho que el generico: la "pata" en
     // angulo (diagonal corta + tramo recto, ver paintTransistor()) necesita
     // lugar para no verse amontonada contra el borde derecho.
-    width_ = isSegmentDisplay ? 72.0 : isIc74ls ? icWidth : isMosLike ? 40.0 : 32.0;
+    width_ = isSegmentDisplay ? 72.0 : isIc74ls ? icWidth : isMosLike ? 40.0 : isMemory ? 64.0 : 32.0;
     const std::size_t sideCount =
         isIc74ls ? std::max(leftSeq.size(), rightSeq.size()) : std::max(leftPins.size(), rightPins.size());
     // El espaciado vertical entre pines es un multiplo de kGridSize (no
@@ -701,7 +706,14 @@ void ComponentItem::rebuildPins() {
     // transmision necesita mas separacion vertical entre pines para que la
     // barra de control y las diagonales (ver paintMosBarAndDiagonals()) no
     // queden apretadas.
-    const qreal pinPitch = (isIc74ls || isMosLike) ? 12.0 : kGridSize;
+    // isMemory usa un pitch bien mayor que el generico (8) e incluso que el
+    // de ic74ls/isMosLike (12): a diferencia de esos, paintMemory() apila
+    // tres cosas en el mismo cuerpo angosto (linea de pin, rotulo de pin y
+    // la sigla central) y con un pitch chico un lado de cantidad impar (p.
+    // ej. J/K/CLK del flip-flop JK) no dejaba ningun hueco vertical
+    // realmente comodo - se leia amontonado (el defecto reportado, con una
+    // referencia visual de simbolo IEEE espaciado como objetivo).
+    const qreal pinPitch = isMemory ? 18.0 : (isIc74ls || isMosLike) ? 12.0 : kGridSize;
     // Un componente de un solo pin (NOT/BUFFER, entrada/salida, LED, sonda)
     // solo necesita 2 "franjas" de pinPitch segun la formula de abajo, dando
     // una caja mas baja que ancha; se impone un piso de 4 franjas (32, igual
@@ -816,11 +828,28 @@ void ComponentItem::rebuildPins() {
 }
 
 QRectF ComponentItem::boundingRect() const {
-    // Reserva siempre el espacio de la etiqueta de instancia (ver paint()),
-    // este presente o no - evita tener que llamar a prepareGeometryChange()
-    // cada vez que el usuario tipea/borra el texto de "label".
+    // Reserva siempre el espacio de la etiqueta de instancia en su posicion
+    // por defecto (ver paint()), este presente o no - evita tener que llamar
+    // a prepareGeometryChange() cada vez que el usuario tipea/borra el texto
+    // de "label". Si se arrastro a otro lado (effectiveLabelOffset() != 0,0),
+    // se une ese rectangulo trasladado -- si no, offset.isNull() ahorra el
+    // calculo extra en el caso comun.
     constexpr qreal kLabelHeight = 14.0;
-    return QRectF(-pinStubLength_, 0.0, width_ + pinStubLength_, height_ + kLabelHeight);
+    const QRectF bodyAndDefaultLabel(-pinStubLength_, 0.0, width_ + pinStubLength_, height_ + kLabelHeight);
+    const QPointF offset = effectiveLabelOffset();
+    if (offset.isNull()) {
+        return bodyAndDefaultLabel;
+    }
+    return bodyAndDefaultLabel.united(labelBaseRect().translated(offset));
+}
+
+QRectF ComponentItem::labelBaseRect() const { return QRectF(-pinStubLength_, height_ + 2.0, width_ + pinStubLength_, 12.0); }
+
+QPointF ComponentItem::effectiveLabelOffset() const {
+    if (liveLabelOffset_.has_value()) {
+        return *liveLabelOffset_;
+    }
+    return document_->componentPlacement(componentId_).labelOffset;
 }
 
 QPainterPath ComponentItem::shape() const {
@@ -864,6 +893,25 @@ QVariant ComponentItem::itemChange(GraphicsItemChange change, const QVariant& va
         }
     }
     return QGraphicsItem::itemChange(change, value);
+}
+
+bool ComponentItem::labelHitTest(QPointF scenePos) const {
+    const components::ComponentInstance* instance = document_->component(componentId_);
+    if (instance == nullptr || std::get<std::string>(instance->property("label")).empty()) {
+        return false;
+    }
+    return labelBaseRect().translated(effectiveLabelOffset()).contains(mapFromScene(scenePos));
+}
+
+QPointF ComponentItem::labelOffset() const { return document_->componentPlacement(componentId_).labelOffset; }
+
+void ComponentItem::setLiveLabelOffset(std::optional<QPointF> offset) {
+    if (liveLabelOffset_ == offset) {
+        return;
+    }
+    prepareGeometryChange();
+    liveLabelOffset_ = offset;
+    update();
 }
 
 void ComponentItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget*) {
@@ -920,9 +968,10 @@ void ComponentItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* opt
     }
 
     // La etiqueta de instancia (propiedad "label", comun a todos los tipos)
-    // se dibuja debajo de la caja, centrada - hasta ahora solo se usaba en
-    // el inspector/JSON pese a que su descripcion ya decia "mostrado junto
-    // al componente".
+    // se dibuja debajo de la caja por defecto, centrada, pero el usuario
+    // puede arrastrarla a cualquier lado (ver effectiveLabelOffset()) --
+    // hasta ahora solo se usaba en el inspector/JSON pese a que su
+    // descripcion ya decia "mostrado junto al componente".
     const std::string& label = std::get<std::string>(instance->property("label"));
     if (!label.empty()) {
         QFont font = painter->font();
@@ -930,7 +979,7 @@ void ComponentItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* opt
         painter->setFont(font);
         painter->setPen(labelInkColor());
 
-        const QRectF labelRect(-pinStubLength_, height_ + 2.0, width_ + pinStubLength_, 12.0);
+        const QRectF labelRect = labelBaseRect().translated(effectiveLabelOffset());
         // "labelRotation" (independiente de ComponentPlacement::
         // rotationDegrees, ver makeLabelRotationProperty()) se mide en
         // pantalla, no en el espacio local del item -- se resta la rotacion
@@ -1475,9 +1524,17 @@ void ComponentItem::paintHexDisplay(QPainter* painter, bool selected) {
                            QString::fromStdString(instance->pins()[i].name));
     }
 
-    const components::HexDisplayState state =
-        components::hexDisplayState(*instance, document_->pinValue(componentId_, 0), document_->pinValue(componentId_, 1),
-                                     document_->pinValue(componentId_, 2), document_->pinValue(componentId_, 3));
+    // El indice fisico de cada bit depende de la propiedad "bitOrder" (ver
+    // hexDisplayIsMsbFirst() y el derivePins() de io.hexDisplay, que ambos
+    // deben coincidir en este orden): LSB primero deja bit0 en el indice 0,
+    // MSB primero lo manda al indice 3. hexDisplayState() en si sigue
+    // recibiendo bit0..bit3 en su orden logico de siempre -- solo cambia de
+    // que pin fisico se lee cada uno.
+    const bool msbFirst = components::hexDisplayIsMsbFirst(*instance);
+    const components::HexDisplayState state = components::hexDisplayState(
+        *instance, document_->pinValue(componentId_, msbFirst ? 3 : 0),
+        document_->pinValue(componentId_, msbFirst ? 2 : 1), document_->pinValue(componentId_, msbFirst ? 1 : 2),
+        document_->pinValue(componentId_, msbFirst ? 0 : 3));
     // Sin conectar (HighImpedance/Unknown, p. ej. mientras se arrastra en el
     // lienzo) se dibuja apagado, igual que un segmento individual de
     // io.seven_segment sin driver -- solo un conflicto real
@@ -1571,27 +1628,54 @@ void ComponentItem::paintArithmetic(QPainter* painter, bool selected) {
 void ComponentItem::paintMemory(QPainter* painter, bool selected) {
     const components::ComponentInstance* instance = document_->component(componentId_);
     const std::string& typeId = instance->typeId();
-    const QRectF bodyRect(3.0, 6.0, width_ - 6.0, height_ - 12.0);
+    const std::vector<components::PinTemplate>& pins = instance->pins();
+
+    // Burbuja de negacion sobre Q' (siempre que el tipo tenga ese pin exacto
+    // - D/JK/T/SR lo tienen, memory.register no) y sobre PRE/CLR cuando la
+    // instancia los tiene Y su polaridad es "activeLow" (memory.srLatch/
+    // register no tienen esa propiedad - findProperty() da null y se evita
+    // el std::get). Reserva su propio margen de cuerpo, igual criterio que
+    // la burbuja de salida de paintGate().
+    constexpr qreal bubbleDiameter = 7.0;
+    const bool hasQnBubble = findPinIndexByName(pins, "Q'").has_value();
+    bool hasPreClrBubble = false;
+    if (findPinIndexByName(pins, "PRE").has_value() &&
+        instance->definition().findProperty("presetClearPolarity") != nullptr) {
+        hasPreClrBubble = std::get<std::string>(instance->property("presetClearPolarity")) == "activeLow";
+    }
+    const qreal rightMargin = 3.0 + (hasQnBubble ? bubbleDiameter + 3.0 : 0.0);
+    const qreal leftMargin = 3.0 + (hasPreClrBubble ? bubbleDiameter + 3.0 : 0.0);
+    const QRectF bodyRect(leftMargin, 6.0, width_ - leftMargin - rightMargin, height_ - 12.0);
 
     painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(20, 20, 20), selected ? 2.0 : 1.5));
     painter->setBrush(bodyFillColor(*instance, QColor(235, 235, 235)));
     painter->drawPath(buildMsiShapePath(MsiShapeKind::Rectangle, bodyRect));
 
-    painter->setPen(QPen(QColor(20, 20, 20), 1.5));
-    for (std::size_t i = 0; i < instance->pins().size(); ++i) {
+    for (std::size_t i = 0; i < pins.size(); ++i) {
         const qreal y = pinLocalPositions_[i].y();
-        const bool isOutput = instance->pins()[i].direction == core::PinDirection::Output;
-        painter->drawLine(QPointF(isOutput ? width_ : 0.0, y),
-                           QPointF(isOutput ? bodyRect.right() : bodyRect.left(), y));
+        const bool isOutput = pins[i].direction == core::PinDirection::Output;
+        qreal stubStart = isOutput ? bodyRect.right() : bodyRect.left();
+        const bool needsBubble =
+            (hasQnBubble && pins[i].name == "Q'") || (hasPreClrBubble && (pins[i].name == "PRE" || pins[i].name == "CLR"));
+        if (needsBubble) {
+            const qreal bubbleCenterX = isOutput ? bodyRect.right() + bubbleDiameter / 2.0 + 1.0
+                                                  : bodyRect.left() - bubbleDiameter / 2.0 - 1.0;
+            painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(15, 15, 15), 2.0));
+            painter->setBrush(QColor(245, 245, 245));
+            painter->drawEllipse(QPointF(bubbleCenterX, y), bubbleDiameter / 2.0, bubbleDiameter / 2.0);
+            stubStart = isOutput ? bubbleCenterX + bubbleDiameter / 2.0 : bubbleCenterX - bubbleDiameter / 2.0;
+        }
+        painter->setPen(QPen(QColor(20, 20, 20), 1.5));
+        painter->drawLine(QPointF(stubStart, y), QPointF(isOutput ? width_ : 0.0, y));
     }
 
     // Muesca de reloj: solo los tipos disparados por flanco (no el latch SR,
     // que es de nivel) - ver el comentario de buildClockTrianglePath.
-    const bool edgeTriggered =
-        typeId == "memory.dFlipFlop" || typeId == "memory.jkFlipFlop" || typeId == "memory.register";
+    const bool edgeTriggered = typeId == "memory.dFlipFlop" || typeId == "memory.jkFlipFlop" ||
+                                typeId == "memory.tFlipFlop" || typeId == "memory.register";
     if (edgeTriggered) {
-        for (std::size_t i = 0; i < instance->pins().size(); ++i) {
-            if (instance->pins()[i].name == "CLK") {
+        for (std::size_t i = 0; i < pins.size(); ++i) {
+            if (pins[i].name == "CLK") {
                 painter->setPen(Qt::NoPen);
                 painter->setBrush(QColor(20, 20, 20));
                 painter->drawPath(buildClockTrianglePath(bodyRect, pinLocalPositions_[i].y(), 6.0));
@@ -1600,8 +1684,108 @@ void ComponentItem::paintMemory(QPainter* painter, bool selected) {
         }
     }
 
-    painter->setPen(Qt::black);
-    painter->drawText(bodyRect, Qt::AlignCenter, QString::fromStdString(instance->definition().displayName));
+    // Nombre de cada pin, adentro del cuerpo (D/CLK/Q/Q'/etc. - antes solo
+    // se veian en el inspector). Ancho de columna medido de verdad, mismo
+    // criterio que paintIc74ls(); el pin CLK se corre un poco a la derecha
+    // para no pisar la muesca de reloj de arriba.
+    QFont pinFont = painter->font();
+    pinFont.setPointSizeF(6.5);
+    painter->setFont(pinFont);
+    const QFontMetricsF pinFontMetrics(pinFont);
+    constexpr qreal labelMargin = 2.0;
+    qreal leftLabelWidth = 0.0;
+    qreal rightLabelWidth = 0.0;
+    for (const components::PinTemplate& pin : pins) {
+        const qreal w = pinFontMetrics.horizontalAdvance(QString::fromStdString(pin.name));
+        if (pin.direction == core::PinDirection::Output) {
+            rightLabelWidth = std::max(rightLabelWidth, w);
+        } else {
+            leftLabelWidth = std::max(leftLabelWidth, w);
+        }
+    }
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(70, 70, 70));
+    for (std::size_t i = 0; i < pins.size(); ++i) {
+        const qreal y = pinLocalPositions_[i].y();
+        const QString name = QString::fromStdString(pins[i].name);
+        if (pins[i].direction == core::PinDirection::Output) {
+            painter->drawText(QRectF(bodyRect.right() - labelMargin - rightLabelWidth, y - 7.0, rightLabelWidth, 14.0),
+                               Qt::AlignVCenter | Qt::AlignRight, name);
+        } else {
+            const qreal clkOffset = (edgeTriggered && pins[i].name == "CLK") ? 8.0 : 0.0;
+            painter->drawText(QRectF(bodyRect.left() + labelMargin + clkOffset, y - 7.0, leftLabelWidth, 14.0),
+                               Qt::AlignVCenter | Qt::AlignLeft, name);
+        }
+    }
+
+    // Sigla corta al centro (D/JK/T/SR/REG) en vez del displayName completo
+    // ("Flip-Flop D" no entraba en el cuerpo angosto) - ver
+    // memoryCenterLabel(). Cae de vuelta al displayName para cualquier
+    // memory.* futuro que esa funcion todavia no reconozca.
+    //
+    // NO se centra a ciegas en bodyRect.center().y(): cada lado se centra en
+    // height_ de forma independiente (ver sideOffsets() en rebuildPins()),
+    // asi que un lado con cantidad IMPAR de pines (p. ej. J/K/CLK del
+    // flip-flop JK, o un registro con bits par -> D0..D(bits-1)+CLK impar)
+    // deja su pin del medio exactamente en el centro geometrico del cuerpo -
+    // el defecto observado: la sigla "JK" quedaba superpuesta con el rotulo
+    // "K". Se busca en cambio el hueco vertical mas grande entre filas de
+    // pin consecutivas (bordes del cuerpo incluidos, ambos lados a la vez)
+    // y se centra ahi.
+    const QString centerLabel = memoryCenterLabel(typeId);
+    QFont centerFont = painter->font();
+    centerFont.setBold(true);
+    centerFont.setPointSizeF(centerLabel.isEmpty() ? 7.0 : 7.5);
+    const QFontMetricsF centerFontMetrics(centerFont);
+
+    qreal centerLabelY = bodyRect.center().y();
+    {
+        std::vector<qreal> pinYs;
+        pinYs.reserve(pins.size() + 2);
+        pinYs.push_back(bodyRect.top());
+        for (const QPointF& pos : pinLocalPositions_) {
+            pinYs.push_back(pos.y());
+        }
+        pinYs.push_back(bodyRect.bottom());
+        std::sort(pinYs.begin(), pinYs.end());
+
+        // Alto real de tinta de la sigla (medido, no adivinado - mismo
+        // criterio que shapeSpanForBand()/paintIc74ls()): cualquier hueco de
+        // al menos eso mas un margen chico alcanza para dibujarla sin tocar
+        // la fila de pin de arriba/abajo. Entre los huecos que alcanzan, se
+        // prefiere el mas cercano al centro geometrico (para no correr la
+        // sigla a un borde cuando el hueco central y uno lateral miden casi
+        // lo mismo); si ninguno alcanza (cuerpo muy apretado), se cae al
+        // hueco mas grande que haya, del tamano que sea.
+        const qreal minGapForLabel = centerFontMetrics.capHeight() + 3.0;
+        qreal largestGap = -1.0;
+        qreal largestGapMid = centerLabelY;
+        qreal bestQualifyingDistance = -1.0;
+        for (std::size_t i = 1; i < pinYs.size(); ++i) {
+            const qreal gap = pinYs[i] - pinYs[i - 1];
+            const qreal mid = (pinYs[i] + pinYs[i - 1]) / 2.0;
+            if (gap > largestGap) {
+                largestGap = gap;
+                largestGapMid = mid;
+            }
+            if (gap >= minGapForLabel) {
+                const qreal distance = std::abs(mid - bodyRect.center().y());
+                if (bestQualifyingDistance < 0.0 || distance < bestQualifyingDistance) {
+                    bestQualifyingDistance = distance;
+                    centerLabelY = mid;
+                }
+            }
+        }
+        if (bestQualifyingDistance < 0.0) {
+            centerLabelY = largestGapMid;
+        }
+    }
+
+    painter->setFont(centerFont);
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(70, 70, 70));
+    const QRectF centerRect(bodyRect.left(), centerLabelY - 8.0, bodyRect.width(), 16.0);
+    painter->drawText(centerRect, Qt::AlignCenter,
+                       centerLabel.isEmpty() ? QString::fromStdString(instance->definition().displayName)
+                                              : centerLabel);
 }
 
 void ComponentItem::paintSubcircuit(QPainter* painter, bool selected) {

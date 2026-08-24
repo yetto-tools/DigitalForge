@@ -23,12 +23,14 @@ using digitalforge::components::ComponentInstance;
 using digitalforge::components::ComponentRegistry;
 using digitalforge::components::ComponentSimBinding;
 using digitalforge::components::hexDigitSegments;
+using digitalforge::components::hexDisplayIsMsbFirst;
 using digitalforge::components::hexDisplayState;
 using digitalforge::components::inputInitialValue;
 using digitalforge::components::ledIsLit;
 using digitalforge::components::ledMatrixCellIsLit;
 using digitalforge::components::ledMatrixMultiplexedCellIsLit;
 using digitalforge::components::parseLogicValueEnum;
+using digitalforge::components::PropertyMap;
 using digitalforge::components::PropertyValue;
 using digitalforge::components::registerBasicComponentLibrary;
 using digitalforge::components::segmentIsLit;
@@ -55,14 +57,14 @@ TEST_CASE("Basic library registers exactly the current set of components", "[com
           "gates.tristateInverter", "gates.nand", "gates.nor", "gates.xor", "gates.xnor", "plexers.decoder",
           "plexers.multiplexer", "plexers.demultiplexer", "plexers.priorityEncoder", "arithmetic.adder",
           "arithmetic.subtractor", "arithmetic.comparator", "memory.srLatch", "memory.dFlipFlop",
-          "memory.jkFlipFlop", "memory.register", "structural.subcircuit", "io.led", "debug.probe",
-          "io.seven_segment", "io.hexDisplay", "io.ledMatrix", "io.terminal", "ic74ls.bcdDriver",
+          "memory.jkFlipFlop", "memory.tFlipFlop", "memory.register", "structural.subcircuit", "io.led",
+          "debug.probe", "io.seven_segment", "io.hexDisplay", "io.ledMatrix", "io.terminal", "ic74ls.bcdDriver",
           "ic74ls.quadNand2", "ic74ls.quadNor2", "ic74ls.quadAnd2", "ic74ls.quadOr2", "ic74ls.quadXor2",
           "ic74ls.hexInverter", "ic74ls.dualDFlipFlop", "ic74ls.dualJkFlipFlop", "ic74ls.decadeCounter",
           "ic74ls.mux8to1", "ic74ls.decoder3to8", "ic74ls.adder4bit", "ic74ls.comparator4bit"}) {
         CHECK(registry.contains(id));
     }
-    CHECK(registry.registeredTypeIds().size() == 53);
+    CHECK(registry.registeredTypeIds().size() == 54);
 }
 
 TEST_CASE("BUFFER gate component passes its input through unchanged", "[components][gates][buffer]") {
@@ -1038,7 +1040,7 @@ TEST_CASE("SR latch sets, resets and holds across S/R combinations", "[component
     Circuit circuit;
 
     ComponentInstance latch = registry.create("memory.srLatch", 0);
-    REQUIRE(latch.pins().size() == 4); // S, R, Q, Qn
+    REQUIRE(latch.pins().size() == 4); // S, R, Q, Q'
 
     std::vector<NetId> nets;
     for (std::size_t i = 0; i < 4; ++i) nets.push_back(circuit.addNet());
@@ -1049,7 +1051,7 @@ TEST_CASE("SR latch sets, resets and holds across S/R combinations", "[component
     latch.buildSimulation(circuit);
 
     Simulator sim(circuit);
-    // Set: S=1, R=0 -> Q=1, Qn=0.
+    // Set: S=1, R=0 -> Q=1, Q'=0.
     sim.setInput(sources[0].simBinding().gateIndex, LogicValue::One);
     sim.setInput(sources[1].simBinding().gateIndex, LogicValue::Zero);
     REQUIRE(sim.runUntilStable());
@@ -1057,7 +1059,7 @@ TEST_CASE("SR latch sets, resets and holds across S/R combinations", "[component
     CHECK(sim.getNetValue(nets[2]) == LogicValue::One);
     CHECK(sim.getNetValue(nets[3]) == LogicValue::Zero);
 
-    // Reset: S=0, R=1 -> Q=0, Qn=1.
+    // Reset: S=0, R=1 -> Q=0, Q'=1.
     sim.setInput(sources[0].simBinding().gateIndex, LogicValue::Zero);
     sim.setInput(sources[1].simBinding().gateIndex, LogicValue::One);
     REQUIRE(sim.runUntilStable());
@@ -1076,7 +1078,7 @@ TEST_CASE("D flip-flop captures D only on rising CLK edges", "[components][memor
     Circuit circuit;
 
     ComponentInstance dff = registry.create("memory.dFlipFlop", 0);
-    REQUIRE(dff.pins().size() == 4); // D, CLK, Q, Qn
+    REQUIRE(dff.pins().size() == 4); // D, CLK, Q, Q'
 
     std::vector<NetId> nets;
     for (std::size_t i = 0; i < 4; ++i) nets.push_back(circuit.addNet());
@@ -1091,13 +1093,13 @@ TEST_CASE("D flip-flop captures D only on rising CLK edges", "[components][memor
     REQUIRE(sim.runUntilStable());
     sim.setInput(sources[1].simBinding().gateIndex, LogicValue::Zero); // CLK=0 confirmado
     REQUIRE(sim.runUntilStable());
-    CHECK(sim.getNetValue(nets[2]) == LogicValue::HighImpedance); // sin flanco todavia
+    CHECK(sim.getNetValue(nets[2]) == LogicValue::Zero); // sin flanco todavia, Q arranca en Zero
 
     sim.setInput(sources[1].simBinding().gateIndex, LogicValue::One); // flanco ascendente
     REQUIRE(sim.runUntilStable());
     CHECK_FALSE(sim.stats().oscillationDetected);
     CHECK(sim.getNetValue(nets[2]) == LogicValue::One);  // Q
-    CHECK(sim.getNetValue(nets[3]) == LogicValue::Zero); // Qn
+    CHECK(sim.getNetValue(nets[3]) == LogicValue::Zero); // Q'
 
     sim.setInput(sources[0].simBinding().gateIndex, LogicValue::Zero); // D cambia solo, CLK sigue en 1
     REQUIRE(sim.runUntilStable());
@@ -1119,7 +1121,7 @@ TEST_CASE("JK flip-flop sets, resets, holds and toggles across successive CLK ed
     Circuit circuit;
 
     ComponentInstance jkff = registry.create("memory.jkFlipFlop", 0);
-    REQUIRE(jkff.pins().size() == 5); // J, K, CLK, Q, Qn
+    REQUIRE(jkff.pins().size() == 5); // J, K, CLK, Q, Q'
 
     std::vector<NetId> nets;
     for (std::size_t i = 0; i < 5; ++i) nets.push_back(circuit.addNet());
@@ -1141,13 +1143,10 @@ TEST_CASE("JK flip-flop sets, resets, holds and toggles across successive CLK ed
         REQUIRE(sim.runUntilStable());
     };
 
-    // Semilla inicial obligatoria: Q realimenta la conversion JK->D (ver
-    // makeJkFlipFlopDefinition), y ese net arranca sin manejar (HighImpedance)
-    // hasta el primer flanco. Con J=0,K=1 ambos terminos de la conversion
-    // colapsan por la regla del cero dominante de AND sin importar el Q
-    // todavia indefinido, asi que Reset es la unica combinacion con
-    // resultado garantizado en el arranque - Set/Hold/Toggle si dependen del
-    // valor previo de Q y por eso no se prueban hasta tener un Q conocido.
+    // Q arranca en Zero (ver Simulator::seedSourceGates()), asi que en
+    // rigor ya hay un valor conocido desde el vamos - este primer pulso de
+    // Reset es solo para dejarlo explicito y no depender de esa semilla,
+    // antes de recorrer Set/Hold/Toggle.
     setJK(LogicValue::Zero, LogicValue::One);
     pulseClk();
     CHECK(sim.getNetValue(nets[3]) == LogicValue::Zero);
@@ -1174,6 +1173,190 @@ TEST_CASE("JK flip-flop sets, resets, holds and toggles across successive CLK ed
     CHECK(sim.getNetValue(nets[3]) == LogicValue::Zero);
 }
 
+TEST_CASE("D flip-flop asyncPresetClear forces Q asynchronously, holds after release, and PRE&CLR together is Error",
+          "[components][memory][dFlipFlop][asyncPresetClear]") {
+    ComponentRegistry registry = makeRegistry();
+    Circuit circuit;
+
+    ComponentInstance dff = registry.create("memory.dFlipFlop", 0, {{"asyncPresetClear", PropertyValue{true}}});
+    REQUIRE(dff.pins().size() == 6); // D, CLK, Q, Q', PRE, CLR (activeHigh por defecto)
+
+    std::vector<NetId> nets;
+    for (std::size_t i = 0; i < 6; ++i) nets.push_back(circuit.addNet());
+    ComponentInstance d = registry.create("wiring.input", 1);
+    ComponentInstance clk = registry.create("wiring.input", 2);
+    ComponentInstance pre = registry.create("wiring.input", 3);
+    ComponentInstance clr = registry.create("wiring.input", 4);
+    d.bindPin(0, nets[0]);
+    dff.bindPin(0, nets[0]);
+    clk.bindPin(0, nets[1]);
+    dff.bindPin(1, nets[1]);
+    dff.bindPin(2, nets[2]); // Q
+    dff.bindPin(3, nets[3]); // Q'
+    pre.bindPin(0, nets[4]);
+    dff.bindPin(4, nets[4]);
+    clr.bindPin(0, nets[5]);
+    dff.bindPin(5, nets[5]);
+
+    d.buildSimulation(circuit);
+    clk.buildSimulation(circuit);
+    pre.buildSimulation(circuit);
+    clr.buildSimulation(circuit);
+    dff.buildSimulation(circuit);
+
+    Simulator sim(circuit);
+    sim.setInput(d.simBinding().gateIndex, LogicValue::Zero);
+    sim.setInput(clk.simBinding().gateIndex, LogicValue::Zero);
+    sim.setInput(pre.simBinding().gateIndex, LogicValue::Zero);
+    sim.setInput(clr.simBinding().gateIndex, LogicValue::Zero);
+    REQUIRE(sim.runUntilStable());
+
+    // PRE=1 fuerza Q=1 de inmediato, sin ningun flanco de CLK.
+    sim.setInput(pre.simBinding().gateIndex, LogicValue::One);
+    REQUIRE(sim.runUntilStable());
+    CHECK_FALSE(sim.stats().oscillationDetected);
+    CHECK(sim.getNetValue(nets[2]) == LogicValue::One);  // Q
+    CHECK(sim.getNetValue(nets[3]) == LogicValue::Zero); // Q'
+
+    // Con PRE en alto, un flanco de CLK no captura D (D=0): PRE manda.
+    sim.setInput(clk.simBinding().gateIndex, LogicValue::One);
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(nets[2]) == LogicValue::One);
+
+    // Al soltar PRE sin un flanco nuevo, Q retiene el valor forzado.
+    sim.setInput(pre.simBinding().gateIndex, LogicValue::Zero);
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(nets[2]) == LogicValue::One);
+
+    // CLR=1 fuerza Q=0 de inmediato.
+    sim.setInput(clr.simBinding().gateIndex, LogicValue::One);
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(nets[2]) == LogicValue::Zero);
+    CHECK(sim.getNetValue(nets[3]) == LogicValue::One);
+
+    // PRE y CLR activos a la vez: la combinacion invalida clasica -> Error en Q y Q'.
+    sim.setInput(pre.simBinding().gateIndex, LogicValue::One);
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(nets[2]) == LogicValue::Error);
+    CHECK(sim.getNetValue(nets[3]) == LogicValue::Error);
+}
+
+TEST_CASE("D flip-flop asyncPresetClear activeLow leaves an unconnected PRE/CLR inactive via the internal pull-up",
+          "[components][memory][dFlipFlop][asyncPresetClear]") {
+    ComponentRegistry registry = makeRegistry();
+    Circuit circuit;
+
+    ComponentInstance dff = registry.create(
+        "memory.dFlipFlop", 0,
+        {{"asyncPresetClear", PropertyValue{true}}, {"presetClearPolarity", PropertyValue{std::string("activeLow")}}});
+    REQUIRE(dff.pins().size() == 6); // D, CLK, Q, Q', PRE, CLR
+
+    std::vector<NetId> nets;
+    for (std::size_t i = 0; i < 6; ++i) nets.push_back(circuit.addNet());
+    ComponentInstance d = registry.create("wiring.input", 1);
+    ComponentInstance clk = registry.create("wiring.input", 2);
+    d.bindPin(0, nets[0]);
+    dff.bindPin(0, nets[0]);
+    clk.bindPin(0, nets[1]);
+    dff.bindPin(1, nets[1]);
+    dff.bindPin(2, nets[2]); // Q
+    dff.bindPin(3, nets[3]); // Q'
+    dff.bindPin(4, nets[4]); // PRE - ningun wiring.input lo maneja (pin "sin conectar")
+    dff.bindPin(5, nets[5]); // CLR - idem
+
+    d.buildSimulation(circuit);
+    clk.buildSimulation(circuit);
+    dff.buildSimulation(circuit); // agrega el WeakOne+Not internos de PRE/CLR (ver asyncControlNet)
+
+    Simulator sim(circuit);
+    sim.setInput(d.simBinding().gateIndex, LogicValue::One);
+    sim.setInput(clk.simBinding().gateIndex, LogicValue::Zero);
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(nets[2]) == LogicValue::Zero); // sin flanco todavia, Q arranca en Zero
+
+    sim.setInput(clk.simBinding().gateIndex, LogicValue::One); // flanco ascendente
+    REQUIRE(sim.runUntilStable());
+    CHECK_FALSE(sim.stats().oscillationDetected);
+    // Captura D con normalidad: sin el pull-up interno, PRE/CLR flotarian en
+    // Z, Not(Z) daria Unknown y el biestable quedaria indeterminado para
+    // siempre en vez de responder al flanco.
+    CHECK(sim.getNetValue(nets[2]) == LogicValue::One);
+    CHECK(sim.getNetValue(nets[3]) == LogicValue::Zero);
+}
+
+TEST_CASE("T flip-flop toggles with T=1, holds with T=0, and CLR seeds a known state (T = JK con J=K=T)",
+          "[components][memory][tFlipFlop]") {
+    ComponentRegistry registry = makeRegistry();
+    Circuit circuit;
+
+    ComponentInstance tff = registry.create("memory.tFlipFlop", 0, {{"asyncPresetClear", PropertyValue{true}}});
+    REQUIRE(tff.pins().size() == 6); // T, CLK, Q, Q', PRE, CLR
+
+    std::vector<NetId> nets;
+    for (std::size_t i = 0; i < 6; ++i) nets.push_back(circuit.addNet());
+    ComponentInstance t = registry.create("wiring.input", 1);
+    ComponentInstance clk = registry.create("wiring.input", 2);
+    ComponentInstance pre = registry.create("wiring.input", 3);
+    ComponentInstance clr = registry.create("wiring.input", 4);
+    t.bindPin(0, nets[0]);
+    tff.bindPin(0, nets[0]);
+    clk.bindPin(0, nets[1]);
+    tff.bindPin(1, nets[1]);
+    tff.bindPin(2, nets[2]); // Q
+    tff.bindPin(3, nets[3]); // Q'
+    pre.bindPin(0, nets[4]);
+    tff.bindPin(4, nets[4]);
+    clr.bindPin(0, nets[5]);
+    tff.bindPin(5, nets[5]);
+
+    t.buildSimulation(circuit);
+    clk.buildSimulation(circuit);
+    pre.buildSimulation(circuit);
+    clr.buildSimulation(circuit);
+    tff.buildSimulation(circuit);
+
+    Simulator sim(circuit);
+    sim.setInput(t.simBinding().gateIndex, LogicValue::Zero);
+    sim.setInput(clk.simBinding().gateIndex, LogicValue::Zero);
+    sim.setInput(pre.simBinding().gateIndex, LogicValue::Zero);
+    sim.setInput(clr.simBinding().gateIndex, LogicValue::Zero);
+    REQUIRE(sim.runUntilStable());
+
+    // A diferencia del D/JK, un T flip-flop no tiene ninguna combinacion de
+    // entrada (sin CLK) con resultado garantizado por si sola: T=1 y T=0
+    // dependen los dos del Q previo (ver el comentario de
+    // makeTFlipFlopDefinition). Q ya arranca en Zero por defecto (ver
+    // Simulator::seedSourceGates()), pero este CLR deja el punto de partida
+    // explicito en vez de apoyarse en esa semilla - y sigue siendo el unico
+    // modo de volver a un estado conocido a mitad de una simulacion ya en
+    // marcha, donde la semilla de arranque ya no aplica.
+    sim.setInput(clr.simBinding().gateIndex, LogicValue::One);
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(nets[2]) == LogicValue::Zero);
+    sim.setInput(clr.simBinding().gateIndex, LogicValue::Zero);
+    REQUIRE(sim.runUntilStable());
+
+    auto pulseClk = [&]() {
+        sim.setInput(clk.simBinding().gateIndex, LogicValue::Zero);
+        REQUIRE(sim.runUntilStable());
+        sim.setInput(clk.simBinding().gateIndex, LogicValue::One);
+        REQUIRE(sim.runUntilStable());
+    };
+
+    sim.setInput(t.simBinding().gateIndex, LogicValue::One); // T=1: toggle en cada flanco
+    pulseClk();
+    CHECK_FALSE(sim.stats().oscillationDetected);
+    CHECK(sim.getNetValue(nets[2]) == LogicValue::One);
+    CHECK(sim.getNetValue(nets[3]) == LogicValue::Zero);
+
+    pulseClk();
+    CHECK(sim.getNetValue(nets[2]) == LogicValue::Zero);
+
+    sim.setInput(t.simBinding().gateIndex, LogicValue::Zero); // T=0: mantiene
+    pulseClk();
+    CHECK(sim.getNetValue(nets[2]) == LogicValue::Zero);
+}
+
 TEST_CASE("Register loads all bits simultaneously on a single CLK edge", "[components][memory][register]") {
     ComponentRegistry registry = makeRegistry();
     Circuit circuit;
@@ -1196,7 +1379,7 @@ TEST_CASE("Register loads all bits simultaneously on a single CLK edge", "[compo
     sim.setInput(sources[2].simBinding().gateIndex, LogicValue::One);
     sim.setInput(sources[3].simBinding().gateIndex, LogicValue::Zero); // CLK=0 confirmado
     REQUIRE(sim.runUntilStable());
-    CHECK(sim.getNetValue(nets[4]) == LogicValue::HighImpedance); // sin flanco todavia
+    CHECK(sim.getNetValue(nets[4]) == LogicValue::Zero); // sin flanco todavia, Q0 arranca en Zero
 
     sim.setInput(sources[3].simBinding().gateIndex, LogicValue::One); // flanco ascendente
     REQUIRE(sim.runUntilStable());
@@ -1365,6 +1548,40 @@ TEST_CASE("Hex display exposes 4 or 5 pins depending on hasDecimalPoint and deco
     const auto state = hexDisplayState(withoutDot, LogicValue::Zero, LogicValue::One, LogicValue::Zero, LogicValue::One);
     REQUIRE(state.valid);
     CHECK(state.segments == hexDigitSegments(0xA));
+}
+
+TEST_CASE("Hex display's bitOrder property reverses which physical pin carries which bit",
+          "[components][hexDisplay]") {
+    ComponentRegistry registry = makeRegistry();
+
+    const ComponentInstance lsbFirst =
+        registry.create("io.hexDisplay", 0, {{"hasDecimalPoint", PropertyValue{false}}});
+    CHECK_FALSE(hexDisplayIsMsbFirst(lsbFirst));
+    REQUIRE(lsbFirst.pins().size() == 4);
+    CHECK(lsbFirst.pins()[0].name == "bit0");
+    CHECK(lsbFirst.pins()[3].name == "bit3");
+
+    const ComponentInstance msbFirst = registry.create(
+        "io.hexDisplay", 1, {{"hasDecimalPoint", PropertyValue{false}}, {"bitOrder", PropertyValue{std::string("msbFirst")}}});
+    CHECK(hexDisplayIsMsbFirst(msbFirst));
+    REQUIRE(msbFirst.pins().size() == 4);
+    // El orden fisico se invierte, pero el pin de indice 0 sigue siendo el
+    // MSB de la MISMA instancia -- ver ComponentItem::paintHexDisplay(), que
+    // lee document_->pinValue(componentId_, msbFirst ? 3 : 0) como bit0.
+    CHECK(msbFirst.pins()[0].name == "bit3");
+    CHECK(msbFirst.pins()[3].name == "bit0");
+
+    // Con el dot habilitado, sigue siempre al final sin importar el orden de
+    // los bits -- su indice (4) no depende de bitOrder.
+    const ComponentInstance msbFirstWithDot = registry.create(
+        "io.hexDisplay", 2, {{"bitOrder", PropertyValue{std::string("msbFirst")}}});
+    REQUIRE(msbFirstWithDot.pins().size() == 5);
+    CHECK(msbFirstWithDot.pins()[0].name == "bit3");
+    CHECK(msbFirstWithDot.pins().back().name == "dot");
+
+    // Proyectos guardados antes de que existiera "bitOrder" no deben
+    // romperse: sin la propiedad en el override, cae al default LSB-primero.
+    CHECK_FALSE(hexDisplayIsMsbFirst(PropertyMap{}));
 }
 
 TEST_CASE("Hex display refuses to decode an ambiguous bit", "[components][hexDisplay][unknown][highz]") {

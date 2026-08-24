@@ -21,6 +21,24 @@ namespace digitalforge::editor {
 // para que la correccion quede escondida dentro del propio punto del pin.
 inline constexpr qreal kWireAlignTolerance = 3.0;
 
+// Umbral (en pixeles de escena) para moveWireCorner(): que tan cerca tiene
+// que pasar el cursor de la x/y de un vertice VECINO para que la esquina se
+// enganche ahi en vez de quedar a una distancia residual. Mucho mas generoso
+// que kWireAlignTolerance (que es para geometria ya asentada, casi exacta) a
+// proposito: es el margen de error de un arrastre a mano, no el de datos ya
+// guardados. Sin este enganche, alinear una esquina a ojo con el trazado de
+// al lado quedaba torcido por unos pixeles casi siempre -- cada intento de
+// "dejarlo derecho" quedaba un poco chueco y el cable se veia lleno de
+// quiebres minusculos en vez de una sola linea recta.
+inline constexpr qreal kCornerAlignSnapTolerance = 10.0;
+
+// Distancia de `p` al segmento [a, b], y de paso (si se pide) el punto de ese
+// segmento mas cercano a `p`. Compartida por el hit-testing de WireItem
+// (nearestPointOnPath()) y por splitWireWaypoints() -- antes cada uno tenia su
+// propia copia de esta proyeccion punto-segmento, con el riesgo de que
+// divergieran en un futuro ajuste.
+[[nodiscard]] qreal distanceToSegment(QPointF p, QPointF a, QPointF b, QPointF* projectionOut = nullptr);
+
 // Los vertices por los que pasa el cable que une `points` (>=2, tipicamente
 // [extremoA, quiebres..., extremoB]): recto donde dos puntos consecutivos ya
 // comparten x o y, y un unico codo en L (horizontal primero) donde no. Es la
@@ -54,7 +72,31 @@ inline constexpr qreal kWireAlignTolerance = 3.0;
 // ortogonales porque wireVertices() vuelve a resolver cada tramo; no hace falta
 // deslizar los vecinos a mano. Devuelve `points` sin cambios si el indice es un
 // extremo (esos no se mueven: los ancla su pin).
+//
+// Si `cursorPos` pasa a menos de kCornerAlignSnapTolerance de la x o la y de
+// alguno de los dos vertices vecinos, se engancha exactamente ahi (en cada eje
+// por separado, contra cualquiera de los dos vecinos). Sin este enganche,
+// alinear una esquina "a ojo" con el resto del trazado casi nunca cae exacto:
+// el resultado queda con esa inclinacion residual como un codo extra en vez
+// de fundirse en un solo tramo recto.
 [[nodiscard]] std::vector<QPointF> moveWireCorner(const std::vector<QPointF>& points, std::size_t cornerIndex,
                                                   QPointF cursorPos);
+
+// Waypoints (sin extremos) para los dos tramos que resultan de partir un
+// cable en `splitPoint` -- ver SplitWireCommand, que crea un punto de union
+// ahi cuando otro cable se deriva sobre el cuerpo de este.
+struct WireSplit {
+    std::vector<QPointF> before; // del extremo A hasta el nuevo punto de union
+    std::vector<QPointF> after;  // del nuevo punto de union hasta el extremo B
+};
+
+// `polyline` es el trazado YA RESUELTO del cable (ver wireVertices()/
+// renderedPolyline()), es decir [extremoA, esquinas..., extremoB]. `splitPoint`
+// tipicamente viene de proyectar el punto de corte sobre ese mismo trazado
+// (WireItem::nearestPointOnPath()), asi que cae siempre sobre uno de sus
+// segmentos. El resultado son los waypoints que hay que asignarle a cada
+// mitad para que, juntas, dibujen exactamente el mismo trazado que tenia el
+// cable original -- partirlo no debe deformar el trazado ya acomodado.
+[[nodiscard]] WireSplit splitWireWaypoints(const std::vector<QPointF>& polyline, QPointF splitPoint);
 
 } // namespace digitalforge::editor

@@ -11,12 +11,16 @@
 #include <stdexcept>
 
 #include "CircuitDocument.hpp"
+#include "KarnaughDocument.hpp"
+#include "TruthTableDocument.hpp"
 #include "components/BasicComponentLibrary.hpp"
 #include "core/Version.hpp"
+#include "formats/KarnaughSerializer.hpp"
 #include "formats/LockFile.hpp"
 #include "formats/LogisimImporter.hpp"
 #include "formats/ProjectManifestSerializer.hpp"
 #include "formats/ProjectSerializer.hpp"
+#include "formats/TruthTableSerializer.hpp"
 
 namespace digitalforge::editor {
 
@@ -66,8 +70,26 @@ void Project::clearAllDocuments() {
     order_.clear();
 }
 
+void Project::clearAllKarnaughDocuments() {
+    for (auto it = karnaughDocuments_.begin(); it != karnaughDocuments_.end();) {
+        emit karnaughDocumentAboutToBeRemoved(it->first);
+        it = karnaughDocuments_.erase(it);
+    }
+    karnaughOrder_.clear();
+}
+
+void Project::clearAllTruthTableDocuments() {
+    for (auto it = truthTableDocuments_.begin(); it != truthTableDocuments_.end();) {
+        emit truthTableDocumentAboutToBeRemoved(it->first);
+        it = truthTableDocuments_.erase(it);
+    }
+    truthTableOrder_.clear();
+}
+
 void Project::newProject() {
     clearAllDocuments();
+    clearAllKarnaughDocuments();
+    clearAllTruthTableDocuments();
     nextId_ = 0;
     projectFilePath_.clear();
     projectName_.clear();
@@ -94,6 +116,34 @@ uint32_t Project::addEntry(const QString& name, const QString& absolutePath) {
     order_.push_back(id);
     refreshSiblingResolvers();
     emit documentAdded(id);
+    return id;
+}
+
+uint32_t Project::addKarnaughEntry(const QString& name, const QString& absolutePath, int variableCount) {
+    KarnaughEntry entry;
+    entry.name = name;
+    entry.absolutePath = absolutePath;
+    entry.document = std::make_unique<KarnaughDocument>();
+    entry.document->reset(variableCount);
+
+    const uint32_t id = nextId_++; // mismo contador que addEntry(): ver el comentario de karnaughDocuments_
+    karnaughDocuments_[id] = std::move(entry);
+    karnaughOrder_.push_back(id);
+    emit karnaughDocumentAdded(id);
+    return id;
+}
+
+uint32_t Project::addTruthTableEntry(const QString& name, const QString& absolutePath, int variableCount) {
+    TruthTableEntry entry;
+    entry.name = name;
+    entry.absolutePath = absolutePath;
+    entry.document = std::make_unique<TruthTableDocument>();
+    entry.document->reset(variableCount);
+
+    const uint32_t id = nextId_++; // mismo contador que addEntry()/addKarnaughEntry()
+    truthTableDocuments_[id] = std::move(entry);
+    truthTableOrder_.push_back(id);
+    emit truthTableDocumentAdded(id);
     return id;
 }
 
@@ -126,6 +176,28 @@ void Project::refreshSiblingResolvers() {
 
 bool Project::hasDocumentNamed(const QString& name, std::optional<uint32_t> excludeId) const {
     for (const auto& [id, entry] : documents_) {
+        if (excludeId.has_value() && id == *excludeId) {
+            continue;
+        }
+        if (entry.name.compare(name, Qt::CaseInsensitive) == 0) {
+            return true;
+        }
+    }
+    // Un mismo espacio de nombres para los dos tipos: un circuito y un
+    // mapa de Karnaugh que se llamaran igual chocarian de todos modos al
+    // guardar (ambos "reservan" el mismo nombre de archivo base, .dfc vs
+    // .dfk) y se verian idénticos en ui::ProjectTree.
+    for (const auto& [id, entry] : karnaughDocuments_) {
+        if (excludeId.has_value() && id == *excludeId) {
+            continue;
+        }
+        if (entry.name.compare(name, Qt::CaseInsensitive) == 0) {
+            return true;
+        }
+    }
+    // Mismo espacio de nombres para las tres colecciones -- ver el
+    // comentario del bucle de arriba.
+    for (const auto& [id, entry] : truthTableDocuments_) {
         if (excludeId.has_value() && id == *excludeId) {
             continue;
         }
@@ -248,6 +320,95 @@ void Project::renameDocument(uint32_t id, const QString& newName) {
     emit documentRenamed(id);
 }
 
+uint32_t Project::addKarnaughDocument(const QString& name, int variableCount) {
+    if (hasDocumentNamed(name)) {
+        throw std::invalid_argument("addKarnaughDocument: ya existe un documento llamado '" + name.toStdString() +
+                                     "'");
+    }
+    const uint32_t id = addKarnaughEntry(name, QString(), variableCount);
+    manifestDirty_ = true;
+    return id;
+}
+
+void Project::removeKarnaughDocument(uint32_t id) {
+    const auto it = karnaughDocuments_.find(id);
+    if (it == karnaughDocuments_.end()) {
+        throw std::invalid_argument("removeKarnaughDocument: documento desconocido");
+    }
+    emit karnaughDocumentAboutToBeRemoved(id);
+    karnaughDocuments_.erase(it);
+    karnaughOrder_.erase(std::find(karnaughOrder_.begin(), karnaughOrder_.end(), id));
+    manifestDirty_ = true;
+}
+
+void Project::renameKarnaughDocument(uint32_t id, const QString& newName) {
+    if (hasDocumentNamed(newName, id)) {
+        throw std::invalid_argument("renameKarnaughDocument: ya existe un documento llamado '" +
+                                     newName.toStdString() + "'");
+    }
+    karnaughDocuments_.at(id).name = newName;
+    manifestDirty_ = true;
+    emit karnaughDocumentRenamed(id);
+}
+
+KarnaughDocument* Project::karnaughDocument(uint32_t id) const { return karnaughDocuments_.at(id).document.get(); }
+
+QString Project::karnaughDocumentName(uint32_t id) const { return karnaughDocuments_.at(id).name; }
+
+std::vector<uint32_t> Project::karnaughDocumentIds() const { return karnaughOrder_; }
+
+uint32_t Project::addTruthTableDocument(const QString& name, int variableCount) {
+    if (hasDocumentNamed(name)) {
+        throw std::invalid_argument("addTruthTableDocument: ya existe un documento llamado '" + name.toStdString() +
+                                     "'");
+    }
+    const uint32_t id = addTruthTableEntry(name, QString(), variableCount);
+    manifestDirty_ = true;
+    return id;
+}
+
+void Project::removeTruthTableDocument(uint32_t id) {
+    const auto it = truthTableDocuments_.find(id);
+    if (it == truthTableDocuments_.end()) {
+        throw std::invalid_argument("removeTruthTableDocument: documento desconocido");
+    }
+    emit truthTableDocumentAboutToBeRemoved(id);
+    truthTableDocuments_.erase(it);
+    truthTableOrder_.erase(std::find(truthTableOrder_.begin(), truthTableOrder_.end(), id));
+    manifestDirty_ = true;
+}
+
+void Project::renameTruthTableDocument(uint32_t id, const QString& newName) {
+    if (hasDocumentNamed(newName, id)) {
+        throw std::invalid_argument("renameTruthTableDocument: ya existe un documento llamado '" +
+                                     newName.toStdString() + "'");
+    }
+    truthTableDocuments_.at(id).name = newName;
+    manifestDirty_ = true;
+    emit truthTableDocumentRenamed(id);
+}
+
+TruthTableDocument* Project::truthTableDocument(uint32_t id) const {
+    return truthTableDocuments_.at(id).document.get();
+}
+
+QString Project::truthTableDocumentName(uint32_t id) const { return truthTableDocuments_.at(id).name; }
+
+std::vector<uint32_t> Project::truthTableDocumentIds() const { return truthTableOrder_; }
+
+Project::DocumentKind Project::documentKind(uint32_t id) const {
+    if (documents_.contains(id)) {
+        return DocumentKind::Circuit;
+    }
+    if (karnaughDocuments_.contains(id)) {
+        return DocumentKind::Karnaugh;
+    }
+    if (truthTableDocuments_.contains(id)) {
+        return DocumentKind::TruthTable;
+    }
+    throw std::invalid_argument("documentKind: id desconocido");
+}
+
 std::vector<uint32_t> Project::documentIds() const { return order_; }
 
 QString Project::documentName(uint32_t id) const { return documents_.at(id).name; }
@@ -278,6 +439,19 @@ bool Project::hasUnsavedChanges() const {
             return true;
         }
     }
+    // Un KarnaughDocument no tiene QUndoStack propio (ver el comentario de
+    // KarnaughDocument.hpp) - su propio flag "dirty" es lo unico que hay
+    // para saber si sus celdas cambiaron desde el ultimo guardado.
+    for (const auto& [id, entry] : karnaughDocuments_) {
+        if (entry.document->dirty()) {
+            return true;
+        }
+    }
+    for (const auto& [id, entry] : truthTableDocuments_) {
+        if (entry.document->dirty()) {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -290,6 +464,8 @@ void Project::loadFromFile(const QString& path) {
     file >> json;
 
     clearAllDocuments();
+    clearAllKarnaughDocuments();
+    clearAllTruthTableDocuments();
     nextId_ = 0;
 
     const QDir baseDir = QFileInfo(path).absoluteDir();
@@ -304,15 +480,23 @@ void Project::loadFromFile(const QString& path) {
         // se invoca durante la carga de componentes de abajo.
         projectFilePath_ = path;
 
-        // Primera pasada: crear *todas* las entradas de documento (sin
-        // cargar su contenido todavia), para que un structural.subcircuit
-        // pueda referenciar a cualquier documento hermano sin importar el
-        // orden en que aparecen en el manifiesto.
+        // Primera pasada: crear *todas* las entradas de documento CIRCUITO
+        // (sin cargar su contenido todavia), para que un
+        // structural.subcircuit pueda referenciar a cualquier documento
+        // hermano sin importar el orden en que aparecen en el manifiesto.
+        // Las entradas de mapa de Karnaugh se procesan aparte mas abajo: no
+        // participan del union-find de subcircuitos ni de
+        // activeDocumentIndex (ver el comentario de
+        // Project::saveToFile() sobre por que siempre quedan al final del
+        // arreglo del manifiesto).
         std::vector<uint32_t> newIds;
         std::vector<QString> absPaths;
         newIds.reserve(manifest.documents.size());
         absPaths.reserve(manifest.documents.size());
         for (const formats::ProjectManifestEntry& docEntry : manifest.documents) {
+            if (docEntry.kind != QStringLiteral("circuit")) {
+                continue;
+            }
             const QString absPath = baseDir.filePath(docEntry.relativePath);
             newIds.push_back(addEntry(docEntry.name, absPath));
             absPaths.push_back(absPath);
@@ -331,18 +515,59 @@ void Project::loadFromFile(const QString& path) {
             formats::loadProjectFromFile(*documents_.at(newIds[i]).document, absPaths[i].toStdString());
         }
 
+        if (newIds.empty()) {
+            // Un manifiesto sin ninguna entrada "circuit" (solo posible con
+            // un archivo armado a mano - Project nunca llega a este estado
+            // por su cuenta, ver removeDocument()) igual debe dejar el
+            // invariante de "al menos un documento circuito" - ver el
+            // comentario de clase de Project.hpp.
+            newIds.push_back(addEntry(QStringLiteral("Documento"), QString()));
+        }
         const int clampedIndex = std::clamp(manifest.activeDocumentIndex, 0, static_cast<int>(newIds.size()) - 1);
         activeId_ = newIds[static_cast<std::size_t>(clampedIndex)];
         undoGroup_.setActiveStack(documents_.at(activeId_).undoStack.get());
+
+        for (const formats::ProjectManifestEntry& docEntry : manifest.documents) {
+            if (docEntry.kind != QStringLiteral("karnaugh")) {
+                continue;
+            }
+            const QString absPath = baseDir.filePath(docEntry.relativePath);
+            // 4 es solo un valor de arranque: loadKarnaughDocumentFromFile()
+            // llama a KarnaughDocument::reset() con el variableCount real
+            // guardado antes de leer ninguna celda.
+            const uint32_t id = addKarnaughEntry(docEntry.name, absPath, 4);
+            formats::loadKarnaughDocumentFromFile(*karnaughDocuments_.at(id).document, absPath.toStdString());
+            karnaughDocuments_.at(id).document->markClean();
+        }
+
+        for (const formats::ProjectManifestEntry& docEntry : manifest.documents) {
+            if (docEntry.kind != QStringLiteral("truthtable")) {
+                continue;
+            }
+            const QString absPath = baseDir.filePath(docEntry.relativePath);
+            // 4 es solo un valor de arranque: loadTruthTableDocumentFromFile()
+            // llama a TruthTableDocument::reset() con el variableCount real
+            // guardado antes de leer ninguna celda.
+            const uint32_t id = addTruthTableEntry(docEntry.name, absPath, 4);
+            formats::loadTruthTableDocumentFromFile(*truthTableDocuments_.at(id).document, absPath.toStdString());
+            truthTableDocuments_.at(id).document->markClean();
+        }
     } else {
         projectName_.clear();
         const uint32_t id = addEntry(QFileInfo(path).completeBaseName(), path);
         formats::loadProject(*documents_.at(id).document, json);
         activeId_ = id;
         undoGroup_.setActiveStack(documents_.at(id).undoStack.get());
-        // Sigue siendo "anonimo": este .dfproj es el circuito en si (schema
-        // viejo), no un manifiesto de proyecto propio.
-        projectFilePath_.clear();
+        // No es un manifiesto de proyecto propio -- este .dfproj es el
+        // circuito en si (schema viejo) -- pero de todos modos vive en una
+        // ubicacion conocida en disco: filePath() debe reportarla para que
+        // Guardar (MainWindow::onSave()) escriba ahi mismo en vez de tratar
+        // cada guardado como si fuera un proyecto nuevo sin abrir (el bug de
+        // "Guardar siempre pide crear un .dfproj"). saveToFile() ya sabe
+        // resolver esto: como entry.absolutePath tambien apunta a `path`
+        // (ver el addEntry() de arriba) y `isNewLocation` da falso, reescribe
+        // el circuito ahi mismo sin promoverlo a manifiesto.
+        projectFilePath_ = path;
     }
 
     manifestDirty_ = false;
@@ -372,6 +597,22 @@ void Project::saveToFile(const QString& path) {
         formats::saveProjectToFile(*entry.document, entry.absolutePath.toStdString());
         entry.undoStack->setClean();
     }
+    for (const uint32_t id : karnaughOrder_) {
+        KarnaughEntry& entry = karnaughDocuments_.at(id);
+        if (entry.absolutePath.isEmpty() || isNewLocation) {
+            entry.absolutePath = projectDir.filePath(entry.name + ".dfk");
+        }
+        formats::saveKarnaughDocumentToFile(*entry.document, entry.absolutePath.toStdString());
+        entry.document->markClean();
+    }
+    for (const uint32_t id : truthTableOrder_) {
+        TruthTableEntry& entry = truthTableDocuments_.at(id);
+        if (entry.absolutePath.isEmpty() || isNewLocation) {
+            entry.absolutePath = projectDir.filePath(entry.name + ".dft");
+        }
+        formats::saveTruthTableDocumentToFile(*entry.document, entry.absolutePath.toStdString());
+        entry.document->markClean();
+    }
 
     if (manifestDirty_ || isNewLocation) {
         formats::ProjectManifest manifest;
@@ -381,6 +622,29 @@ void Project::saveToFile(const QString& path) {
             formats::ProjectManifestEntry manifestEntry;
             manifestEntry.name = entry.name;
             manifestEntry.relativePath = projectDir.relativeFilePath(entry.absolutePath);
+            manifestEntry.kind = QStringLiteral("circuit");
+            manifest.documents.push_back(std::move(manifestEntry));
+        }
+        // Los mapas de Karnaugh van SIEMPRE despues de todos los circuitos
+        // en el arreglo del manifiesto -- asi manifest.activeDocumentIndex
+        // (que solo indexa circuitos, ver Project::loadFromFile()) nunca
+        // necesita saber que hay mapas de Karnaugh de por medio.
+        for (const uint32_t id : karnaughOrder_) {
+            const KarnaughEntry& entry = karnaughDocuments_.at(id);
+            formats::ProjectManifestEntry manifestEntry;
+            manifestEntry.name = entry.name;
+            manifestEntry.relativePath = projectDir.relativeFilePath(entry.absolutePath);
+            manifestEntry.kind = QStringLiteral("karnaugh");
+            manifest.documents.push_back(std::move(manifestEntry));
+        }
+        // Las tablas de verdad van despues de los mapas de Karnaugh, por la
+        // misma razon.
+        for (const uint32_t id : truthTableOrder_) {
+            const TruthTableEntry& entry = truthTableDocuments_.at(id);
+            formats::ProjectManifestEntry manifestEntry;
+            manifestEntry.name = entry.name;
+            manifestEntry.relativePath = projectDir.relativeFilePath(entry.absolutePath);
+            manifestEntry.kind = QStringLiteral("truthtable");
             manifest.documents.push_back(std::move(manifestEntry));
         }
 

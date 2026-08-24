@@ -82,7 +82,7 @@ Primitivas disponibles y su aridad:
 | `Buffer`, `Not` | 1 | |
 | `And`, `Or`, `Nand`, `Nor`, `Xor`, `Xnor` | ≥ 2 | |
 | `TriStateBuffer` | 2 | `in`: D, OE |
-| `DFlipFlop` | 2 | `in`: D, CLK (con estado propio) |
+| `DFlipFlop` | 2 o 4 | `in`: D, CLK, y opcionalmente PRE, CLR asincronicos activos en alto (con estado propio). Q arranca en Zero (no flotante) al construir/reiniciar la simulacion - igual convencion que otros simuladores de referencia (Logisim, Proteus), necesaria para que un flip-flop en modo toggle (J=K atados, o un `memory.tFlipFlop`) resuelva solo sin depender de un reset explicito. |
 | `ConstantZero`, `ConstantOne` | 0 | fuente fija |
 | `WeakZero`, `WeakOne` | 0 | fuente débil (pull-down/pull-up) |
 
