@@ -99,6 +99,7 @@ private:
     void paintGeneric(QPainter* painter, bool selected);
     void paintGate(QPainter* painter, bool selected);
     void paintInput(QPainter* painter, bool selected);
+    void paintConstant(QPainter* painter, bool selected);
     void paintClock(QPainter* painter, bool selected);
     void paintPowerOnReset(QPainter* painter, bool selected);
     void paintOutput(QPainter* painter, bool selected);

@@ -933,6 +933,15 @@ void ComponentItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* opt
         paintTerminal(painter, selected);
     } else if (typeId == "wiring.input") {
         paintInput(painter, selected);
+    } else if (typeId == "wiring.constant") {
+        // Antes caia en paintGeneric() y se veia como una caja gris con la
+        // palabra "Constante" adentro, sin mostrar si conduce 0 o 1 (el
+        // defecto reportado - habia que abrir el inspector para saberlo).
+        // paintConstant() usa el mismo glifo grande y color por valor que
+        // wiring.input, pero con contorno rectangular (no la punta de
+        // puerto) para no confundirse con una Entrada real, que si es
+        // interactiva.
+        paintConstant(painter, selected);
     } else if (typeId == "wiring.clock") {
         paintClock(painter, selected);
     } else if (typeId == "wiring.powerOnReset") {
@@ -1120,6 +1129,29 @@ void ComponentItem::paintInput(QPainter* painter, bool selected) {
     // redimensionar el componente.
     const QRectF textRect = bodyRect.translated(-bodyRect.height() * 0.095, -bodyRect.height() * 0.045);
     painter->drawText(textRect, Qt::AlignCenter, logicValueGlyph(value));
+}
+
+void ComponentItem::paintConstant(QPainter* painter, bool selected) {
+    // Mismo color/glifo por valor que wiring.input (ver paintInput() arriba),
+    // pero con un contorno rectangular liso en vez de la punta de puerto -
+    // a pedido explicito, para distinguirlo de un vistazo de una Entrada real
+    // (que si es interactiva) ya que ahora se ven casi identicos.
+    const core::LogicValue value = document_->pinValue(componentId_, 0);
+    const QRectF bodyRect(3.0, 6.0, width_ - 7.0, height_ - 12.0);
+
+    painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(20, 20, 20), selected ? 2.0 : 1.5));
+    painter->setBrush(logicValueColor(value));
+    painter->drawRect(bodyRect);
+    painter->drawLine(QPointF(bodyRect.right(), height_ / 2.0), QPointF(width_ - PinItem::kRadius, height_ / 2.0));
+
+    QFont font = painter->font();
+    font.setBold(true);
+    font.setPointSizeF(12.0);
+    painter->setFont(font);
+    painter->setPen(value == core::LogicValue::Zero || value == core::LogicValue::Error ? Qt::white : Qt::black);
+    // Sin la compensacion optica de paintInput(): un rectangulo es simetrico,
+    // el centro geometrico ya es el centro visual correcto.
+    painter->drawText(bodyRect, Qt::AlignCenter, logicValueGlyph(value));
 }
 
 void ComponentItem::paintClock(QPainter* painter, bool selected) {
@@ -1665,7 +1697,12 @@ void ComponentItem::paintMemory(QPainter* painter, bool selected) {
             painter->drawEllipse(QPointF(bubbleCenterX, y), bubbleDiameter / 2.0, bubbleDiameter / 2.0);
             stubStart = isOutput ? bubbleCenterX + bubbleDiameter / 2.0 : bubbleCenterX - bubbleDiameter / 2.0;
         }
-        painter->setPen(QPen(QColor(20, 20, 20), 1.5));
+        // Gris claro (no negro): el cuerpo por defecto de memory.* ahora es
+        // oscuro (#2C2D2E, ver makeBodyColorProperty() en
+        // BasicComponentLibrary.cpp), asi que una linea casi negra se perdia
+        // contra el - mismo criterio que ya usa paintIc74ls() para sus
+        // lineas de pin reales sobre un cuerpo igual de oscuro.
+        painter->setPen(QPen(QColor(0x8C, 0x8C, 0x8C), 1.5));
         painter->drawLine(QPointF(stubStart, y), QPointF(isOutput ? width_ : 0.0, y));
     }
 
@@ -1677,7 +1714,7 @@ void ComponentItem::paintMemory(QPainter* painter, bool selected) {
         for (std::size_t i = 0; i < pins.size(); ++i) {
             if (pins[i].name == "CLK") {
                 painter->setPen(Qt::NoPen);
-                painter->setBrush(QColor(20, 20, 20));
+                painter->setBrush(QColor(0x8C, 0x8C, 0x8C));
                 painter->drawPath(buildClockTrianglePath(bodyRect, pinLocalPositions_[i].y(), 6.0));
                 break;
             }
@@ -1703,7 +1740,7 @@ void ComponentItem::paintMemory(QPainter* painter, bool selected) {
             leftLabelWidth = std::max(leftLabelWidth, w);
         }
     }
-    painter->setPen(selected ? QColor(30, 90, 220) : QColor(70, 70, 70));
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(0x8C, 0x8C, 0x8C));
     for (std::size_t i = 0; i < pins.size(); ++i) {
         const qreal y = pinLocalPositions_[i].y();
         const QString name = QString::fromStdString(pins[i].name);
@@ -1717,71 +1754,26 @@ void ComponentItem::paintMemory(QPainter* painter, bool selected) {
         }
     }
 
-    // Sigla corta al centro (D/JK/T/SR/REG) en vez del displayName completo
-    // ("Flip-Flop D" no entraba en el cuerpo angosto) - ver
-    // memoryCenterLabel(). Cae de vuelta al displayName para cualquier
-    // memory.* futuro que esa funcion todavia no reconozca.
+    // Sigla corta (D/JK/T/SR/REG) en vez del displayName completo ("Flip-Flop
+    // D" no entraba en el cuerpo angosto) - ver memoryCenterLabel(). Cae de
+    // vuelta al displayName para cualquier memory.* futuro que esa funcion
+    // todavia no reconozca.
     //
-    // NO se centra a ciegas en bodyRect.center().y(): cada lado se centra en
-    // height_ de forma independiente (ver sideOffsets() en rebuildPins()),
-    // asi que un lado con cantidad IMPAR de pines (p. ej. J/K/CLK del
-    // flip-flop JK, o un registro con bits par -> D0..D(bits-1)+CLK impar)
-    // deja su pin del medio exactamente en el centro geometrico del cuerpo -
-    // el defecto observado: la sigla "JK" quedaba superpuesta con el rotulo
-    // "K". Se busca en cambio el hueco vertical mas grande entre filas de
-    // pin consecutivas (bordes del cuerpo incluidos, ambos lados a la vez)
-    // y se centra ahi.
+    // Pegada arriba, no centrada en el cuerpo (a pedido explicito, y es
+    // ademas el criterio que ya se ve en la referencia de Proteus que se
+    // uso de guia): un margen fijo chico debajo del borde superior, en vez
+    // de perseguir el hueco entre filas de pin - mas simple y predecible,
+    // y de paso evita la colision que tenia antes contra un pin del medio
+    // (p. ej. "K" en el flip-flop JK) al buscar el centro geometrico.
     const QString centerLabel = memoryCenterLabel(typeId);
     QFont centerFont = painter->font();
     centerFont.setBold(true);
     centerFont.setPointSizeF(centerLabel.isEmpty() ? 7.0 : 7.5);
     const QFontMetricsF centerFontMetrics(centerFont);
-
-    qreal centerLabelY = bodyRect.center().y();
-    {
-        std::vector<qreal> pinYs;
-        pinYs.reserve(pins.size() + 2);
-        pinYs.push_back(bodyRect.top());
-        for (const QPointF& pos : pinLocalPositions_) {
-            pinYs.push_back(pos.y());
-        }
-        pinYs.push_back(bodyRect.bottom());
-        std::sort(pinYs.begin(), pinYs.end());
-
-        // Alto real de tinta de la sigla (medido, no adivinado - mismo
-        // criterio que shapeSpanForBand()/paintIc74ls()): cualquier hueco de
-        // al menos eso mas un margen chico alcanza para dibujarla sin tocar
-        // la fila de pin de arriba/abajo. Entre los huecos que alcanzan, se
-        // prefiere el mas cercano al centro geometrico (para no correr la
-        // sigla a un borde cuando el hueco central y uno lateral miden casi
-        // lo mismo); si ninguno alcanza (cuerpo muy apretado), se cae al
-        // hueco mas grande que haya, del tamano que sea.
-        const qreal minGapForLabel = centerFontMetrics.capHeight() + 3.0;
-        qreal largestGap = -1.0;
-        qreal largestGapMid = centerLabelY;
-        qreal bestQualifyingDistance = -1.0;
-        for (std::size_t i = 1; i < pinYs.size(); ++i) {
-            const qreal gap = pinYs[i] - pinYs[i - 1];
-            const qreal mid = (pinYs[i] + pinYs[i - 1]) / 2.0;
-            if (gap > largestGap) {
-                largestGap = gap;
-                largestGapMid = mid;
-            }
-            if (gap >= minGapForLabel) {
-                const qreal distance = std::abs(mid - bodyRect.center().y());
-                if (bestQualifyingDistance < 0.0 || distance < bestQualifyingDistance) {
-                    bestQualifyingDistance = distance;
-                    centerLabelY = mid;
-                }
-            }
-        }
-        if (bestQualifyingDistance < 0.0) {
-            centerLabelY = largestGapMid;
-        }
-    }
+    const qreal centerLabelY = bodyRect.top() + centerFontMetrics.capHeight() / 2.0 + 4.0;
 
     painter->setFont(centerFont);
-    painter->setPen(selected ? QColor(30, 90, 220) : QColor(70, 70, 70));
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(0x8C, 0x8C, 0x8C));
     const QRectF centerRect(bodyRect.left(), centerLabelY - 8.0, bodyRect.width(), 16.0);
     painter->drawText(centerRect, Qt::AlignCenter,
                        centerLabel.isEmpty() ? QString::fromStdString(instance->definition().displayName)

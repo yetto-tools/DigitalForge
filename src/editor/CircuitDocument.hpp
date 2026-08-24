@@ -195,21 +195,21 @@ public:
     // destino (pin o punto de union), sin borrar el otro extremo. Reconstruye
     // el WireItem correspondiente (via wireAboutToBeRemoved + wireAdded, para
     // que la vista tome la nueva ancla) y limpia el punto de union viejo si
-    // quedo huerfano. Devuelve false (sin cambios) si el destino no existe, ya
-    // tiene otro cable conectado (ver pinHasWire()), o dejaria el cable
-    // conectado a si mismo. `endIsA` elige cual extremo se reconecta.
+    // quedo huerfano. Devuelve false (sin cambios) si el destino no existe o
+    // dejaria el cable conectado a si mismo. `endIsA` elige cual extremo se
+    // reconecta.
     bool retargetWire(uint32_t wireId, bool endIsA, WireEndpoint newEndpoint);
 
     [[nodiscard]] const WireConnection* wire(uint32_t wireId) const;
     [[nodiscard]] std::vector<uint32_t> wireIds() const;
     [[nodiscard]] std::vector<WireConnection> wiresAttachedToComponent(uint32_t componentId) const;
-    // Un pin acepta UN SOLO cable conectado directamente -- ramificar desde un
-    // pin requiere pasar por un punto de union (2 o mas cables ahi si).
-    // addWire()/retargetWire() usan esto para rechazar una segunda conexion
-    // directa al mismo pin. `ignoreWireId` excluye ese cable de la busqueda
-    // (retargetWire() lo usa para no chocar contra el propio cable que esta
-    // reconectando).
-    [[nodiscard]] bool pinHasWire(PinRef pin, std::optional<uint32_t> ignoreWireId = std::nullopt) const;
+    // Todos los cables conectados directamente a este pin - un pin acepta
+    // cuantos cables hagan falta (igual criterio que un punto de union, ver
+    // wiresAttachedToJunction()), asi que puede haber 0, 1 o varios. Sirve
+    // tanto para el punto de empalme relleno cuando hay 2+ (ver
+    // PinItem::paint()) como para cualquier chequeo de conectividad
+    // ("size() >= 1" reemplaza al viejo pinHasWire()/"tiene algun cable").
+    [[nodiscard]] std::vector<WireConnection> wiresAttachedToPin(PinRef pin) const;
 
     // Punto de union libre: ver el comentario de Junction mas arriba.
     // reserveJunctionId()/addJunctionWithId() siguen el mismo patron de

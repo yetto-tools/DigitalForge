@@ -364,13 +364,11 @@ void WireItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
         }
         const WireEndpoint current = isA ? a_ : b_;
         const WireEndpoint other = isA ? b_ : a_;
-        // Un pin ya conectado a OTRO cable tampoco es un destino valido (ver
-        // CircuitDocument::pinHasWire()) -- *target == current/other ya cubre
-        // el caso de que sea un extremo de este mismo cable, asi que si
-        // pinHasWire() da true aca es siempre por un cable distinto.
-        const bool targetPinOccupied =
-            target.has_value() && !target->isJunction && document_->pinHasWire(target->pin());
-        if (!target.has_value() || *target == current || *target == other || targetPinOccupied ||
+        // Un pin ya conectado a OTRO cable es un destino valido -- acepta
+        // cuantos cables hagan falta. Solo se rechaza si es un extremo de
+        // este mismo cable (soltarlo donde ya estaba, o sobre el otro
+        // extremo, dejaria el cable conectado a si mismo).
+        if (!target.has_value() || *target == current || *target == other ||
             !document_->requireEditable(QStringLiteral("reconectar un cable"))) {
             updateGeometry(); // revertir el preview
             return;

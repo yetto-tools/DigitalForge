@@ -85,7 +85,14 @@ void PinItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*
         painter->drawPolygon(arrow);
         return;
     }
-    painter->drawEllipse(rect());
+    // Punto de empalme: un pin acepta cuantos cables hagan falta (ya no solo
+    // uno), asi que cuando convergen 2 o mas se agranda un poco el circulo -
+    // mismo tratamiento que JunctionItem::paint() en su hover (rect()
+    // agrandado 1.5px), para que el fan-out se note de un vistazo sin
+    // dibujar un segundo circulo superpuesto.
+    const std::size_t wireCount = document_->wiresAttachedToPin(PinRef{componentId_, pinIndex_}).size();
+    const QRectF pinRect = wireCount >= 2 ? rect().adjusted(-1.5, -1.5, 1.5, 1.5) : rect();
+    painter->drawEllipse(pinRect);
 }
 
 void PinItem::mousePressEvent(QGraphicsSceneMouseEvent* event) { event->accept(); }

@@ -101,53 +101,50 @@ TEST_CASE("retargetWire refuses a destination that would connect the wire to its
     CHECK(w->b == WireEndpoint(PinRef{led, 0}));
 }
 
-TEST_CASE("addWire rejects a second direct wire on a pin that already has one",
+TEST_CASE("A pin accepts multiple direct wires, all merging into the same net (estilo Proteus)",
           "[circuitdocument][wire]") {
     CircuitDocument doc;
-    const uint32_t in0 = doc.addComponent("wiring.input");
+    const uint32_t in0 = doc.addComponent("wiring.input", {{"initialValue", PropertyValue{std::string("1")}}});
     const uint32_t ledA = doc.addComponent("io.led");
     const uint32_t ledB = doc.addComponent("io.led");
 
     doc.addWire(PinRef{in0, 0}, PinRef{ledA, 0});
-    // in0's unico pin ya tiene un cable -- ramificar hacia ledB requiere un
-    // punto de union (ver el otro TEST_CASE de mas arriba con
-    // pinHasWire()), no un segundo cable directo al mismo pin.
-    CHECK_THROWS_AS(doc.addWire(PinRef{in0, 0}, PinRef{ledB, 0}), std::invalid_argument);
-    REQUIRE(doc.pinHasWire(PinRef{in0, 0}));
+    // Un segundo cable directo al mismo pin ya no se rechaza -- un pin
+    // acepta cuantos cables hagan falta, sin pasar por un punto de union
+    // intermedio (ver CircuitDocument::wiresAttachedToPin()).
+    CHECK_NOTHROW(doc.addWire(PinRef{in0, 0}, PinRef{ledB, 0}));
+    CHECK(doc.wiresAttachedToPin(PinRef{in0, 0}).size() == 2);
 
-    // Un punto de union, en cambio, si acepta cuantos cables hagan falta --
-    // ledC/ledD son pines nuevos, sin ningun cable previo (a diferencia de
-    // ledA/ledB de arriba).
-    const uint32_t ledC = doc.addComponent("io.led");
-    const uint32_t ledD = doc.addComponent("io.led");
-    const uint32_t junctionId = doc.reserveJunctionId();
-    doc.addJunctionWithId(junctionId, QPointF(10, 10));
-    doc.addWire(WireEndpoint::junction(junctionId), PinRef{ledC, 0});
-    CHECK_NOTHROW(doc.addWire(WireEndpoint::junction(junctionId), PinRef{ledD, 0}));
+    CHECK(doc.pinValue(ledA, 0) == LogicValue::One);
+    CHECK(doc.pinValue(ledB, 0) == LogicValue::One);
 }
 
-TEST_CASE("retargetWire refuses a pin that already has another wire", "[circuitdocument][retarget]") {
+TEST_CASE("retargetWire accepts a pin that already has another wire, merging both into one net",
+          "[circuitdocument][retarget]") {
     CircuitDocument doc;
-    const uint32_t in0 = doc.addComponent("wiring.input");
-    const uint32_t in1 = doc.addComponent("wiring.input");
+    const uint32_t in0 = doc.addComponent("wiring.input", {{"initialValue", PropertyValue{std::string("1")}}});
     const uint32_t ledA = doc.addComponent("io.led");
     const uint32_t ledB = doc.addComponent("io.led");
+    const uint32_t ledC = doc.addComponent("io.led"); // sumidero, sin driver propio -- no compite por la net
 
     doc.addWire(PinRef{in0, 0}, PinRef{ledA, 0});
-    const uint32_t wireToLedB = doc.addWire(PinRef{in1, 0}, PinRef{ledB, 0});
+    const uint32_t wireToLedB = doc.addWire(PinRef{ledC, 0}, PinRef{ledB, 0});
 
-    // ledA ya tiene un cable (el de in0) -- reapuntar el otro cable ahi
-    // tambien chocaria contra el mismo pin.
-    CHECK_FALSE(doc.retargetWire(wireToLedB, /*endIsA=*/false, WireEndpoint(PinRef{ledA, 0})));
+    // ledA ya tiene un cable (el de in0) -- reapuntar el otro cable ahi ya
+    // no se rechaza: el pin termina con dos cables, los dos en la misma net.
+    CHECK(doc.retargetWire(wireToLedB, /*endIsA=*/false, WireEndpoint(PinRef{ledA, 0})));
     const auto* w = doc.wire(wireToLedB);
     REQUIRE(w != nullptr);
-    CHECK(w->b == WireEndpoint(PinRef{ledB, 0})); // sin cambios
+    CHECK(w->b == WireEndpoint(PinRef{ledA, 0}));
+    CHECK(doc.wiresAttachedToPin(PinRef{ledA, 0}).size() == 2);
+    CHECK(doc.pinValue(ledA, 0) == LogicValue::One);
+    CHECK(doc.pinValue(ledC, 0) == LogicValue::One); // ledC ahora comparte la net de in0 via ledA
 
-    // Reapuntarlo a su MISMA posicion actual (el pin que ya tenia) no debe
-    // chocar contra si mismo -- ignoreWireId excluye a este cable de la
-    // busqueda de pinHasWire(), o el pin se veria "ocupado" por su propio
-    // cable y hasta un no-op quedaria rechazado.
-    CHECK(doc.retargetWire(wireToLedB, /*endIsA=*/false, WireEndpoint(PinRef{ledB, 0})));
+    // Reapuntarlo a su MISMA posicion actual (el pin que ya tenia) sigue
+    // siendo un no-op valido -- ya no hace falta ningun caso especial para
+    // esto, un pin ocupado (aunque sea por si mismo) siempre es un destino
+    // valido.
+    CHECK(doc.retargetWire(wireToLedB, /*endIsA=*/false, WireEndpoint(PinRef{ledA, 0})));
 }
 
 TEST_CASE("A geometric-connection hint merges two pins into one net without a drawn wire",

@@ -787,8 +787,8 @@ ComponentDefinition makeSrLatchDefinition() {
                               "mantiene el ultimo estado. S=R=1 simultaneo es la combinacion invalida clasica "
                               "(Q=Q'=0 mientras dure).";
     definition.category = ComponentCategory::Memory;
-    definition.appearanceVersion = 2; // paintMemory() ahora rotula pines/dibuja la burbuja de Q'/el punto de Q
-    definition.properties = {makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#EBEBEB"), makeCustomWidthProperty(),
+    definition.appearanceVersion = 3; // + fondo oscuro por defecto (#2C2D2E), igual criterio que D/JK/T
+    definition.properties = {makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#2C2D2E"), makeCustomWidthProperty(),
                               makeCustomHeightProperty(), makeNotesProperty()};
     definition.derivePins = [](const PropertyMap&) {
         return std::vector<PinTemplate>{
@@ -907,7 +907,7 @@ ComponentDefinition makeDFlipFlopDefinition() {
                               makePresetClearPolarityProperty(),
                               makeLabelProperty(),
                               makeLabelRotationProperty(),
-                              makeBodyColorProperty("#EBEBEB"),
+                              makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(),
                               makeCustomHeightProperty(),
                               makeNotesProperty()};
@@ -956,7 +956,7 @@ ComponentDefinition makeJkFlipFlopDefinition() {
                               makePresetClearPolarityProperty(),
                               makeLabelProperty(),
                               makeLabelRotationProperty(),
-                              makeBodyColorProperty("#EBEBEB"),
+                              makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(),
                               makeCustomHeightProperty(),
                               makeNotesProperty()};
@@ -1005,7 +1005,7 @@ ComponentDefinition makeTFlipFlopDefinition() {
                               makePresetClearPolarityProperty(),
                               makeLabelProperty(),
                               makeLabelRotationProperty(),
-                              makeBodyColorProperty("#EBEBEB"),
+                              makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(),
                               makeCustomHeightProperty(),
                               makeNotesProperty()};
@@ -1049,8 +1049,8 @@ ComponentDefinition makeRegisterDefinition() {
     definition.description = "Banco de N flip-flops D con un CLK compartido: en cada flanco ascendente de CLK "
                               "carga D0..D(bits-1) en Q0..Q(bits-1) simultaneamente.";
     definition.category = ComponentCategory::Memory;
-    definition.appearanceVersion = 2; // paintMemory() ahora rotula pines/ancho 48px
-    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#EBEBEB"),
+    definition.appearanceVersion = 3; // + fondo oscuro por defecto (#2C2D2E), igual criterio que D/JK/T
+    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
     definition.derivePins = [](const PropertyMap& properties) {
         const auto bits = std::get<uint64_t>(properties.at("bits"));

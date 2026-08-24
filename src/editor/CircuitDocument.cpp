@@ -159,16 +159,6 @@ uint32_t CircuitDocument::addWire(WireEndpoint a, WireEndpoint b) {
     } else if (!junctions_.contains(b.id)) {
         throw std::invalid_argument("addWire: unknown junction");
     }
-    // Un pin acepta un solo cable directo -- ramificar necesita un punto de
-    // union (ver pinHasWire()). Los puntos de union no tienen este limite:
-    // aceptan cuantos cables hagan falta, es justamente su proposito.
-    if (!a.isJunction && pinHasWire(a.pin())) {
-        throw std::invalid_argument("addWire: pin already has a wire");
-    }
-    if (!b.isJunction && pinHasWire(b.pin())) {
-        throw std::invalid_argument("addWire: pin already has a wire");
-    }
-
     const uint32_t id = nextWireId_++;
     wires_[id] = WireConnection{id, a, b, {}};
     emit wireAdded(id);
@@ -205,16 +195,12 @@ bool CircuitDocument::retargetWire(uint32_t wireId, bool endIsA, WireEndpoint ne
     if (it == wires_.end()) {
         return false;
     }
-    // El nuevo destino debe existir, y si es un pin no puede tener ya otro
-    // cable (mismo criterio que addWire() -- ver pinHasWire()). `wireId` se
-    // excluye de la busqueda: reconectar el cable a la posicion que YA tenia
-    // no debe rechazarse por chocar contra si mismo.
+    // El nuevo destino debe existir -- un pin acepta cuantos cables hagan
+    // falta (ver wiresAttachedToPin() en el header), asi que aca solo se
+    // valida que el pin/union exista, no su cantidad de cables.
     if (!newEndpoint.isJunction) {
         const auto* comp = component(newEndpoint.id);
         if (comp == nullptr || newEndpoint.pinIndex >= comp->pins().size()) {
-            return false;
-        }
-        if (pinHasWire(newEndpoint.pin(), wireId)) {
             return false;
         }
     } else if (!junctions_.contains(newEndpoint.id)) {
@@ -269,17 +255,15 @@ std::vector<WireConnection> CircuitDocument::wiresAttachedToComponent(uint32_t c
     return result;
 }
 
-bool CircuitDocument::pinHasWire(PinRef pin, std::optional<uint32_t> ignoreWireId) const {
+std::vector<WireConnection> CircuitDocument::wiresAttachedToPin(PinRef pin) const {
+    std::vector<WireConnection> result;
     const WireEndpoint endpoint{pin};
     for (const auto& [id, w] : wires_) {
-        if (ignoreWireId.has_value() && id == *ignoreWireId) {
-            continue;
-        }
         if (w.a == endpoint || w.b == endpoint) {
-            return true;
+            result.push_back(w);
         }
     }
-    return false;
+    return result;
 }
 
 void CircuitDocument::addJunctionWithId(uint32_t junctionId, QPointF position) {

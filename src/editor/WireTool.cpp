@@ -54,17 +54,6 @@ bool isSameConnectionPoint(const WireGestureEndpoint& a, const WireGestureEndpoi
     return false;
 }
 
-// Un pin acepta un solo cable directo (ver CircuitDocument::pinHasWire()) --
-// ramificar desde un pin ya conectado necesita pasar por un punto de union,
-// asi que terminar ahi es un destino invalido igual que "el mismo punto de
-// partida" (mismo tratamiento visual/de commit en todo este archivo: rojo en
-// el preview, gesto cancelado en vez de intentar una conexion que
-// CircuitDocument igual rechazaria).
-bool isOccupiedPin(const CircuitDocument* document, const WireGestureEndpoint& hit) {
-    return hit.pin != nullptr &&
-           document->pinHasWire(PinRef{hit.pin->componentId(), hit.pin->pinIndex()});
-}
-
 } // namespace
 
 WireTool::WireTool(CircuitScene* scene, CircuitDocument* document, QUndoStack* undoStack)
@@ -128,7 +117,10 @@ void WireTool::updateAxis(QPointF cursorScenePos) {
     const qreal dy = std::abs(delta.y());
     // Hasta no alejarse un poco del ultimo punto, la direccion dominante es
     // ruido: fijar el eje ahi haria que el codo saliera para cualquier lado.
-    constexpr qreal kAxisLockThreshold = 6.0;
+    // Umbral subido de 6 a 12 (defecto reportado: al arrastrar para conectar
+    // un cable, el eje se fijaba con el primer temblor del mouse, antes de
+    // que el usuario definiera hacia donde iba en serio).
+    constexpr qreal kAxisLockThreshold = 12.0;
     if (std::max(dx, dy) < kAxisLockThreshold) {
         return;
     }
@@ -138,7 +130,10 @@ void WireTool::updateAxis(QPointF cursorScenePos) {
     // volado queda fijo para todo el tramo. Mientras el movimiento siga siendo
     // ambiguo se espera (sin eje no hay escalera, y wireVertices() ya dibuja un
     // codo en L por defecto); apenas el usuario define una direccion, se fija.
-    constexpr qreal kAxisDominance = ComponentItem::kGridSize;
+    // Subido de 1 a 2 franjas de grilla por el mismo motivo que el umbral de
+    // arriba: exigir una diferencia mas clara entre dx/dy antes de comprometer
+    // el eje a una sola direccion para el resto del tramo.
+    constexpr qreal kAxisDominance = ComponentItem::kGridSize * 2.0;
     if (std::abs(dx - dy) < kAxisDominance) {
         return;
     }
@@ -202,11 +197,10 @@ void WireTool::press(QGraphicsSceneMouseEvent* event) {
 
     if (!drawing_) {
         // Inicio de un trazado: solo desde un pin/union/cuerpo de cable. Un
-        // pin que ya tiene otro cable tampoco sirve de arranque -- el destino
-        // final quedaria igual de invalido, asi que se rechaza aca de una vez
-        // (mismo criterio que isOccupiedPin() aplica al destino).
+        // pin ya conectado sirve igual de arranque -- acepta cuantos cables
+        // hagan falta, igual que un punto de union.
         const WireGestureEndpoint start = hitTest(pos);
-        if (start.empty() || isOccupiedPin(document_, start)) {
+        if (start.empty()) {
             return;
         }
         drawing_ = true;
@@ -222,7 +216,7 @@ void WireTool::press(QGraphicsSceneMouseEvent* event) {
     // que caiga sobre un destino valido distinto del inicio, en cuyo caso
     // cierra el cable.
     const WireGestureEndpoint hit = hitTest(pos);
-    if (!hit.empty() && !isSameConnectionPoint(startHit_, hit) && !isOccupiedPin(document_, hit)) {
+    if (!hit.empty() && !isSameConnectionPoint(startHit_, hit)) {
         commitTo(hit, pos);
         return;
     }
@@ -269,12 +263,11 @@ void WireTool::updatePreview(QPointF cursorScenePos) {
 
     // Color del preview segun el destino bajo el cursor: verde si soltar ahi
     // haria una conexion valida, rojo si es un destino invalido (el mismo
-    // punto de partida, o un pin que ya tiene otro cable), gris neutro si
-    // todavia no hay destino (vacio/grilla).
+    // punto de partida), gris neutro si todavia no hay destino (vacio/grilla).
     QPen pen;
     if (end.empty()) {
         pen = QPen(Qt::darkGray, 1, Qt::DashLine);
-    } else if (isSameConnectionPoint(startHit_, end) || isOccupiedPin(document_, end)) {
+    } else if (isSameConnectionPoint(startHit_, end)) {
         pen = QPen(QColor(220, 60, 60), 2, Qt::DashLine);
     } else {
         pen = QPen(QColor(40, 180, 70), 2);
@@ -294,8 +287,8 @@ void WireTool::release(QGraphicsSceneMouseEvent* event) {
     const bool wasDrag = (event->scenePos() - pressPos_).manhattanLength() > 4.0;
     if (isFirstSegment && wasDrag) {
         const WireGestureEndpoint end = hitTest(event->scenePos());
-        if (isSameConnectionPoint(startHit_, end) || isOccupiedPin(document_, end)) {
-            cancel(); // arrastre de vuelta al mismo punto, o a un pin ya ocupado: sin efecto
+        if (isSameConnectionPoint(startHit_, end)) {
+            cancel(); // arrastre de vuelta al mismo punto: sin efecto
         } else {
             // Destino valido, o vacio (se crea un punto de union libre ahi).
             commitTo(end, event->scenePos());
@@ -311,8 +304,8 @@ void WireTool::finishAt(QPointF scenePos) {
         return;
     }
     const WireGestureEndpoint end = hitTest(scenePos);
-    if (isSameConnectionPoint(startHit_, end) || isOccupiedPin(document_, end)) {
-        return; // terminar sobre el mismo punto de partida, o un pin ya ocupado, no es valido
+    if (isSameConnectionPoint(startHit_, end)) {
+        return; // terminar sobre el mismo punto de partida no es valido
     }
     commitTo(end, scenePos); // destino valido o vacio (crea punto de union libre)
 }
