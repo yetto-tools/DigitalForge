@@ -63,6 +63,13 @@ private:
     // arrastrar). Fuente de verdad para el offset en vivo y para el
     // SetWireWaypointsCommand final en afterRelease.
     std::map<uint32_t, std::vector<QPointF>> wireStartWaypoints_;
+    // Cables con waypoints guardados pero con UN SOLO extremo entre lo
+    // seleccionado (el otro se queda quieto) -- a esos no se les arrastra el
+    // trazado en bloque (ver el comentario de collectWire() en el .cpp): se
+    // resetean a auto-ruteo en afterRelease() si el gesto realmente los movio,
+    // en vez de deformarse porque el trazado viejo quedo pensado para una
+    // geometria que ya no existe.
+    std::vector<uint32_t> resetWireIds_;
     // Posicion de escena del press que inicio el gesto -- ancla fija para
     // calcular el delta total del arrastre de grupo (ver afterMove()).
     QPointF pressScenePos_;

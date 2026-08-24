@@ -119,8 +119,11 @@ void WireTool::updateAxis(QPointF cursorScenePos) {
     // ruido: fijar el eje ahi haria que el codo saliera para cualquier lado.
     // Umbral subido de 6 a 12 (defecto reportado: al arrastrar para conectar
     // un cable, el eje se fijaba con el primer temblor del mouse, antes de
-    // que el usuario definiera hacia donde iba en serio).
-    constexpr qreal kAxisLockThreshold = 12.0;
+    // que el usuario definiera hacia donde iba en serio) y despues bajado a
+    // 9 (el nuevo defecto reportado: 12 costaba demasiado para lograr un
+    // quiebre a proposito - habia que alejarse mucho del ultimo punto antes
+    // de que el gesto reaccionara).
+    constexpr qreal kAxisLockThreshold = 9.0;
     if (std::max(dx, dy) < kAxisLockThreshold) {
         return;
     }
@@ -131,9 +134,10 @@ void WireTool::updateAxis(QPointF cursorScenePos) {
     // ambiguo se espera (sin eje no hay escalera, y wireVertices() ya dibuja un
     // codo en L por defecto); apenas el usuario define una direccion, se fija.
     // Subido de 1 a 2 franjas de grilla por el mismo motivo que el umbral de
-    // arriba: exigir una diferencia mas clara entre dx/dy antes de comprometer
-    // el eje a una sola direccion para el resto del tramo.
-    constexpr qreal kAxisDominance = ComponentItem::kGridSize * 2.0;
+    // arriba, y despues bajado a 1.5 (mismo ajuste de sensibilidad que
+    // kAxisLockThreshold: 2 franjas completas volvia dificil comprometer el
+    // eje a proposito).
+    constexpr qreal kAxisDominance = ComponentItem::kGridSize * 1.5;
     if (std::abs(dx - dy) < kAxisDominance) {
         return;
     }

@@ -13,6 +13,18 @@
 
 namespace digitalforge::editor {
 
+namespace {
+// Un extremo cuenta como "en movimiento" si su componente/union esta
+// seleccionado (todo lo seleccionado se arrastra junto via ItemIsMovable) --
+// mismo criterio que usa deltaForWire() para decidir si un extremo pertenece
+// al gesto en curso.
+bool anchorIsMoving(const WireAnchor& anchor) {
+    if (anchor.component != nullptr) return anchor.component->isSelected();
+    if (anchor.junction != nullptr) return anchor.junction->isSelected();
+    return false;
+}
+} // namespace
+
 SelectionTool::SelectionTool(CircuitScene* scene, CircuitDocument* document, QUndoStack* undoStack)
     : scene_(scene), document_(document), undoStack_(undoStack) {}
 
@@ -20,6 +32,7 @@ void SelectionTool::afterPress(QGraphicsSceneMouseEvent* event) {
     dragStartPositions_.clear();
     junctionDragStartPositions_.clear();
     wireStartWaypoints_.clear();
+    resetWireIds_.clear();
     pressScenePos_ = event->scenePos();
 
     const auto collectWire = [this](WireItem* wire) {
@@ -28,8 +41,23 @@ void SelectionTool::afterPress(QGraphicsSceneMouseEvent* event) {
             return; // ya capturado (el otro extremo tambien esta en la seleccion)
         }
         const WireConnection* connection = document_->wire(wireId);
-        if (connection != nullptr && !connection->waypoints.empty()) {
+        if (connection == nullptr || connection->waypoints.empty()) {
+            return; // sin waypoints propios: se auto-rutea solo, nada que arrastrar
+        }
+        // Trasladar el trazado en bloque (el camino de siempre, mas abajo) solo
+        // tiene sentido si los DOS extremos se mueven juntos como un grupo
+        // rigido -- si uno se queda quieto, un quiebre pensado para la
+        // geometria vieja ya no tiene por que seguir sirviendo ahi, y
+        // trasladarlo igual lo deformaba fuerte (el defecto reportado: mover
+        // un componente con una conexion ya trazada dejaba el cable
+        // irreconocible). Para ese caso se resetea a auto-ruteo en
+        // afterRelease() en vez de arrastrarlo -- el resultado puede verse
+        // asimetrico respecto de como estaba antes, que es justamente lo que
+        // se pidio en vez de forzar la forma vieja sobre una posicion nueva.
+        if (anchorIsMoving(wire->anchorA()) && anchorIsMoving(wire->anchorB())) {
             wireStartWaypoints_[wireId] = connection->waypoints;
+        } else {
+            resetWireIds_.push_back(wireId);
         }
     };
 
@@ -159,9 +187,29 @@ void SelectionTool::afterRelease(QGraphicsSceneMouseEvent*) {
         }
     }
 
+    // Cables con un solo extremo en movimiento (ver collectWire() en
+    // afterPress()): se resetean a auto-ruteo si el gesto de verdad los movio
+    // (un clic sin arrastre no debe generar un comando de undo de la nada).
+    for (const uint32_t wireId : resetWireIds_) {
+        WireItem* wire = scene_->wireItem(wireId);
+        if (wire == nullptr) {
+            continue;
+        }
+        const std::optional<QPointF> delta = deltaForWire(wire);
+        if (!delta.has_value() || *delta == QPointF(0.0, 0.0)) {
+            continue;
+        }
+        const WireConnection* connection = document_->wire(wireId);
+        if (connection == nullptr || connection->waypoints.empty()) {
+            continue;
+        }
+        undoStack_->push(new SetWireWaypointsCommand(document_, wireId, connection->waypoints, {}));
+    }
+
     dragStartPositions_.clear();
     junctionDragStartPositions_.clear();
     wireStartWaypoints_.clear();
+    resetWireIds_.clear();
 }
 
 } // namespace digitalforge::editor

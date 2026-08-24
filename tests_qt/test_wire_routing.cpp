@@ -69,14 +69,19 @@ TEST_CASE("wireVertices describes exactly what buildWirePath draws", "[editor][w
     }
 }
 
-TEST_CASE("A diagonal pair becomes a single horizontal-first elbow", "[editor][wireRouting]") {
-    // Una sola forma posible, siempre la misma: nada de codo en Z centrado que
-    // pueda "saltar" de lado, ni desvios por obstaculos.
+TEST_CASE("A diagonal pair becomes a Z/S elbow that enters both ends horizontally",
+          "[editor][wireRouting]") {
+    // Todo pin de este simulador sale en horizontal (ver ComponentItem::
+    // rebuildPins()) de los dos lados posibles -- un codo en L que terminara
+    // en vertical quedaba "clavado" contra el costado del componente en vez
+    // de entrar por donde el pin realmente apunta. El codo vertical va a la
+    // mitad de camino en x, sin ningun desvio por obstaculos.
     const std::vector<QPointF> vertices = wireVertices({{0.0, 0.0}, {200.0, 80.0}});
-    REQUIRE(vertices.size() == 3);
+    REQUIRE(vertices.size() == 4);
     CHECK(vertices[0] == QPointF(0.0, 0.0));
-    CHECK(vertices[1] == QPointF(200.0, 0.0)); // horizontal primero
-    CHECK(vertices[2] == QPointF(200.0, 80.0));
+    CHECK(vertices[1] == QPointF(100.0, 0.0));   // sale horizontal
+    CHECK(vertices[2] == QPointF(100.0, 80.0));  // codo vertical a mitad de camino
+    CHECK(vertices[3] == QPointF(200.0, 80.0));  // entra horizontal
 }
 
 TEST_CASE("Nearly aligned points are routed as a straight run", "[editor][wireRouting]") {

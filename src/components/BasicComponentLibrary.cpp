@@ -309,7 +309,8 @@ ComponentDefinition makeDecoderDefinition() {
     definition.displayName = "Decodificador";
     definition.description = "N bits de seleccion -> 2^N salidas; una sola salida activa por combinacion.";
     definition.category = ComponentCategory::Plexers;
-    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#EBEBEB"),
+    definition.appearanceVersion = 2; // paintPlexer() ahora rotula pines/fondo oscuro por defecto
+    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
     definition.derivePins = [](const PropertyMap& properties) {
         const auto selectBits = std::get<uint64_t>(properties.at("selectBits"));
@@ -351,7 +352,8 @@ ComponentDefinition makeMultiplexerDefinition() {
     definition.displayName = "Multiplexor";
     definition.description = "2^N lineas de datos + N bits de seleccion -> 1 salida (la linea de datos elegida).";
     definition.category = ComponentCategory::Plexers;
-    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#EBEBEB"),
+    definition.appearanceVersion = 2; // paintPlexer() ahora rotula pines/fondo oscuro por defecto
+    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
     definition.derivePins = [](const PropertyMap& properties) {
         const auto selectBits = std::get<uint64_t>(properties.at("selectBits"));
@@ -397,7 +399,8 @@ ComponentDefinition makeDemultiplexerDefinition() {
     definition.description = "1 entrada de datos + N bits de seleccion -> 2^N salidas (la elegida repite el dato, "
                               "el resto queda en 0).";
     definition.category = ComponentCategory::Plexers;
-    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#EBEBEB"),
+    definition.appearanceVersion = 2; // paintPlexer() ahora rotula pines/fondo oscuro por defecto
+    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
     definition.derivePins = [](const PropertyMap& properties) {
         const auto selectBits = std::get<uint64_t>(properties.at("selectBits"));
@@ -443,7 +446,8 @@ ComponentDefinition makePriorityEncoderDefinition() {
                               "prioridad (la de indice mas alto), mas un pin 'valid' encendido si alguna entrada "
                               "esta activa.";
     definition.category = ComponentCategory::Plexers;
-    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#EBEBEB"),
+    definition.appearanceVersion = 2; // paintPlexer() ahora rotula pines/fondo oscuro por defecto
+    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
     definition.derivePins = [](const PropertyMap& properties) {
         const auto selectBits = std::get<uint64_t>(properties.at("selectBits"));
@@ -533,8 +537,9 @@ ComponentDefinition makeAdderDefinition() {
     definition.displayName = "Sumador";
     definition.description = "Sumador binario de N bits con acarreo de entrada (Cin) y de salida (Cout).";
     definition.category = ComponentCategory::Arithmetic;
-    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#EBEBEB"),
+    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
+    definition.appearanceVersion = 2; // paintArithmetic() ahora rotula pines/fondo oscuro por defecto
     definition.derivePins = [](const PropertyMap& properties) {
         const auto bits = std::get<uint64_t>(properties.at("bits"));
         std::vector<PinTemplate> pins;
@@ -593,8 +598,9 @@ ComponentDefinition makeSubtractorDefinition() {
     definition.displayName = "Restador";
     definition.description = "Restador binario de N bits (A - B) con prestamo de entrada (Bin) y de salida (Bout).";
     definition.category = ComponentCategory::Arithmetic;
-    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#EBEBEB"),
+    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
+    definition.appearanceVersion = 2; // paintArithmetic() ahora rotula pines/fondo oscuro por defecto
     definition.derivePins = [](const PropertyMap& properties) {
         const auto bits = std::get<uint64_t>(properties.at("bits"));
         std::vector<PinTemplate> pins;
@@ -657,8 +663,9 @@ ComponentDefinition makeComparatorDefinition() {
     definition.displayName = "Comparador";
     definition.description = "Comparador de magnitud de N bits sin signo: expone GT (A>B), EQ (A==B) y LT (A<B).";
     definition.category = ComponentCategory::Arithmetic;
-    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#EBEBEB"),
+    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
+    definition.appearanceVersion = 2; // paintArithmetic() ahora rotula pines/fondo oscuro por defecto
     definition.derivePins = [](const PropertyMap& properties) {
         const auto bits = std::get<uint64_t>(properties.at("bits"));
         std::vector<PinTemplate> pins;

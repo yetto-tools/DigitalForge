@@ -637,17 +637,27 @@ void ComponentItem::rebuildPins() {
     // para que el piso de 4 franjas de abajo (32 tambien) de una proporcion
     // cercana a 1:1 en el caso mas comun (1-2 pines) - a 64 de ancho quedaba
     // muy alargado a lo horizontal.
-    // ic74ls.* necesita mas ancho que el generico: a diferencia de
-    // Plexers/Aritmetica (sin etiquetas de pin, fuera de alcance por ahora -
-    // ver docs/component-status.md), paintIc74ls() si dibuja el nombre de
-    // cada pin (entrada a la izquierda, salida a la derecha), y 32px no
-    // alcanza para texto legible en ambos lados.
+    // ic74ls.* necesita mas ancho que el generico: paintIc74ls() dibuja el
+    // nombre de cada pin (entrada a la izquierda, salida a la derecha), y
+    // 32px no alcanza para texto legible en ambos lados (mismo motivo que
+    // isPlexer/isArithmetic mas abajo, cada uno con su propio ancho medido).
     const bool isIc74ls = instance->typeId().rfind("ic74ls.", 0) == 0;
     // memory.* (paintMemory()) tambien rotula sus pines ahora (D/CLK/Q/Q',
     // etc.) y agrega una burbuja de negacion sobre Q'/PRE/CLR cuando
     // corresponde - 32px alcanzaba para el rectangulo mudo de antes, pero
     // no para eso.
     const bool isMemory = instance->typeId().rfind("memory.", 0) == 0;
+    // plexers.* (paintPlexer()) tambien rotula sus pines ahora - mismo
+    // ancho medido de verdad que ic74ls.* (ver icWidth mas abajo), porque
+    // el nombre mas largo ("valid") y la cantidad de pines (2^selectBits,
+    // variable por instancia) no entran en un ancho fijo.
+    const bool isPlexer = instance->typeId().rfind("plexers.", 0) == 0;
+    // arithmetic.* (paintArithmetic()) tambien rotula sus pines ahora
+    // (A0/B0/Cin/Sum0/Cout/GT/EQ/LT/etc.) - mismo ancho medido de verdad que
+    // plexers.*, porque la cantidad de pines por lado escala con la
+    // propiedad "bits" (variable por instancia, hasta 64+64+1 del lado
+    // izquierdo en el sumador/restador).
+    const bool isArithmetic = instance->typeId().rfind("arithmetic.", 0) == 0;
     // Secuencia fisica real del DIP (ver ComponentDefinition::
     // physicalPinout), partida en las dos columnas visuales top-a-bottom:
     // izquierda tal cual (pin1 arriba), derecha invertida (el DIP la
@@ -689,10 +699,62 @@ void ComponentItem::rebuildPins() {
         const qreal rawWidth = 6.0 + 2.0 + leftLabelWidth + centralGapReserve + rightLabelWidth + 2.0;
         icWidth = std::max(52.0, std::ceil(rawWidth / kGridSize) * kGridSize);
     }
+    // Mismo criterio que icWidth de arriba, pero midiendo leftPins/rightPins
+    // (indices por direccion, no physicalPinout - plexers.* no tiene DIP
+    // fisico) en vez de leftSeq/rightSeq.
+    qreal plexerWidth = 40.0;
+    if (isPlexer) {
+        QFont pinFont;
+        pinFont.setPointSizeF(6.5); // igual tamano que paintPlexer()
+        const QFontMetricsF pinFontMetrics(pinFont);
+        qreal leftLabelWidth = 0.0;
+        qreal rightLabelWidth = 0.0;
+        for (const uint16_t idx : leftPins) {
+            leftLabelWidth =
+                std::max(leftLabelWidth, pinFontMetrics.horizontalAdvance(QString::fromStdString(pins[idx].name)));
+        }
+        for (const uint16_t idx : rightPins) {
+            rightLabelWidth =
+                std::max(rightLabelWidth, pinFontMetrics.horizontalAdvance(QString::fromStdString(pins[idx].name)));
+        }
+        // Insets del cuerpo (6) + margen de cada columna (4 c/u, ver
+        // labelMargin en paintPlexer() - subido de 2 porque se sentia
+        // apretado contra el borde/el centro) + las dos columnas medidas +
+        // hueco central de sobra.
+        constexpr qreal centralGapReserve = 26.0;
+        const qreal rawWidth = 6.0 + 4.0 + leftLabelWidth + centralGapReserve + rightLabelWidth + 4.0;
+        plexerWidth = std::max(48.0, std::ceil(rawWidth / kGridSize) * kGridSize);
+    }
+    // Mismo criterio que plexerWidth de arriba.
+    qreal arithmeticWidth = 40.0;
+    if (isArithmetic) {
+        QFont pinFont;
+        pinFont.setPointSizeF(6.5); // igual tamano que paintArithmetic()
+        const QFontMetricsF pinFontMetrics(pinFont);
+        qreal leftLabelWidth = 0.0;
+        qreal rightLabelWidth = 0.0;
+        for (const uint16_t idx : leftPins) {
+            leftLabelWidth =
+                std::max(leftLabelWidth, pinFontMetrics.horizontalAdvance(QString::fromStdString(pins[idx].name)));
+        }
+        for (const uint16_t idx : rightPins) {
+            rightLabelWidth =
+                std::max(rightLabelWidth, pinFontMetrics.horizontalAdvance(QString::fromStdString(pins[idx].name)));
+        }
+        constexpr qreal centralGapReserve = 26.0;
+        const qreal rawWidth = 6.0 + 4.0 + leftLabelWidth + centralGapReserve + rightLabelWidth + 4.0;
+        arithmeticWidth = std::max(48.0, std::ceil(rawWidth / kGridSize) * kGridSize);
+    }
     // isMosLike usa un poco mas de ancho que el generico: la "pata" en
     // angulo (diagonal corta + tramo recto, ver paintTransistor()) necesita
     // lugar para no verse amontonada contra el borde derecho.
-    width_ = isSegmentDisplay ? 72.0 : isIc74ls ? icWidth : isMosLike ? 40.0 : isMemory ? 64.0 : 32.0;
+    width_ = isSegmentDisplay ? 72.0
+             : isIc74ls       ? icWidth
+             : isMosLike      ? 40.0
+             : isMemory       ? 64.0
+             : isPlexer       ? plexerWidth
+             : isArithmetic   ? arithmeticWidth
+                               : 32.0;
     const std::size_t sideCount =
         isIc74ls ? std::max(leftSeq.size(), rightSeq.size()) : std::max(leftPins.size(), rightPins.size());
     // El espaciado vertical entre pines es un multiplo de kGridSize (no
@@ -713,7 +775,7 @@ void ComponentItem::rebuildPins() {
     // ej. J/K/CLK del flip-flop JK) no dejaba ningun hueco vertical
     // realmente comodo - se leia amontonado (el defecto reportado, con una
     // referencia visual de simbolo IEEE espaciado como objetivo).
-    const qreal pinPitch = isMemory ? 18.0 : (isIc74ls || isMosLike) ? 12.0 : kGridSize;
+    const qreal pinPitch = isMemory ? 18.0 : (isIc74ls || isMosLike || isPlexer || isArithmetic) ? 12.0 : kGridSize;
     // Un componente de un solo pin (NOT/BUFFER, entrada/salida, LED, sonda)
     // solo necesita 2 "franjas" de pinPitch segun la formula de abajo, dando
     // una caja mas baja que ancha; se impone un piso de 4 franjas (32, igual
@@ -1593,68 +1655,149 @@ void ComponentItem::paintHexDisplay(QPainter* painter, bool selected) {
 void ComponentItem::paintPlexer(QPainter* painter, bool selected) {
     const components::ComponentInstance* instance = document_->component(componentId_);
     const std::string& typeId = instance->typeId();
-    // "Uno a muchos" (decodificador/demultiplexor) vs "muchos a uno"
-    // (multiplexor/codificador de prioridad) - ver el comentario de
-    // MsiShapeKind en MsiShapes.hpp.
-    const bool fanOut = typeId == "plexers.decoder" || typeId == "plexers.demultiplexer";
-    const MsiShapeKind kind = fanOut ? MsiShapeKind::FanOutTrapezoid : MsiShapeKind::FanInTrapezoid;
-    const QRectF bodyRect(3.0, 6.0, width_ - 6.0, height_ - 12.0);
-
-    painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(20, 20, 20), selected ? 2.0 : 1.5));
-    painter->setBrush(bodyFillColor(*instance, QColor(235, 235, 235)));
-    painter->drawPath(buildMsiShapePath(kind, bodyRect));
-
-    painter->setPen(QPen(QColor(20, 20, 20), 1.5));
-    for (std::size_t i = 0; i < instance->pins().size(); ++i) {
-        const qreal y = pinLocalPositions_[i].y();
-        const bool isOutput = instance->pins()[i].direction == core::PinDirection::Output;
-        painter->drawLine(QPointF(isOutput ? width_ : 0.0, y),
-                           QPointF(isOutput ? bodyRect.right() : bodyRect.left(), y));
-    }
-
-    painter->setPen(Qt::black);
-    painter->drawText(bodyRect, Qt::AlignCenter, QString::fromStdString(instance->definition().displayName));
-}
-
-void ComponentItem::paintArithmetic(QPainter* painter, bool selected) {
-    const components::ComponentInstance* instance = document_->component(componentId_);
-    const std::string& typeId = instance->typeId();
+    const std::vector<components::PinTemplate>& pins = instance->pins();
+    // Rectangulo liso, no el trapecio fan-in/fan-out de ANSI/IEEE que tenia
+    // antes: el lado angosto del trapecio deja MENOS ancho real que el que
+    // usa bodyRect (narrowInset en MsiShapes.hpp es un 28% de la altura), y
+    // los rotulos de pin de ahi abajo se miden/posicionan para el ancho
+    // COMPLETO del bodyRect - contra ese lado angosto, el texto se salia
+    // del contorno visible (el defecto reportado). La sigla (DEC/MUX/
+    // DEMUX/PRI, ver mas abajo) mas la diferencia obvia en cantidad de
+    // pines entre los dos lados ya deja clara la direccion "uno a muchos"
+    // vs "muchos a uno" sin necesitar la forma trapezoidal.
     const QRectF bodyRect(3.0, 6.0, width_ - 6.0, height_ - 12.0);
 
     painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(20, 20, 20), selected ? 2.0 : 1.5));
     painter->setBrush(bodyFillColor(*instance, QColor(235, 235, 235)));
     painter->drawPath(buildMsiShapePath(MsiShapeKind::Rectangle, bodyRect));
 
-    painter->setPen(QPen(QColor(20, 20, 20), 1.5));
-    for (std::size_t i = 0; i < instance->pins().size(); ++i) {
+    painter->setPen(QPen(QColor(0x8C, 0x8C, 0x8C), 1.5));
+    for (std::size_t i = 0; i < pins.size(); ++i) {
         const qreal y = pinLocalPositions_[i].y();
-        const bool isOutput = instance->pins()[i].direction == core::PinDirection::Output;
+        const bool isOutput = pins[i].direction == core::PinDirection::Output;
         painter->drawLine(QPointF(isOutput ? width_ : 0.0, y),
                            QPointF(isOutput ? bodyRect.right() : bodyRect.left(), y));
     }
 
-    // Glifo vectorial chico (sin drawText - queda reservado para el nombre
-    // centrado abajo): "+" sumador, "-" restador, "=" comparador.
-    const QPointF glyphCenter(bodyRect.center().x(), bodyRect.top() + bodyRect.height() * 0.22);
-    const qreal glyphHalf = std::min(bodyRect.width(), bodyRect.height()) * 0.14;
-    painter->setPen(QPen(QColor(20, 20, 20), 1.6));
-    if (typeId == "arithmetic.adder") {
-        painter->drawLine(QPointF(glyphCenter.x() - glyphHalf, glyphCenter.y()),
-                           QPointF(glyphCenter.x() + glyphHalf, glyphCenter.y()));
-        painter->drawLine(QPointF(glyphCenter.x(), glyphCenter.y() - glyphHalf),
-                           QPointF(glyphCenter.x(), glyphCenter.y() + glyphHalf));
-    } else if (typeId == "arithmetic.subtractor") {
-        painter->drawLine(QPointF(glyphCenter.x() - glyphHalf, glyphCenter.y()),
-                           QPointF(glyphCenter.x() + glyphHalf, glyphCenter.y()));
-    } else { // arithmetic.comparator
-        painter->drawLine(QPointF(glyphCenter.x() - glyphHalf, glyphCenter.y() - glyphHalf * 0.5),
-                           QPointF(glyphCenter.x() + glyphHalf, glyphCenter.y() - glyphHalf * 0.5));
-        painter->drawLine(QPointF(glyphCenter.x() - glyphHalf, glyphCenter.y() + glyphHalf * 0.5),
-                           QPointF(glyphCenter.x() + glyphHalf, glyphCenter.y() + glyphHalf * 0.5));
+    // Nombre de cada pin, adentro del cuerpo (S0/D0/Y0/valid/etc. - antes
+    // solo se veian en el inspector). Ancho de columna medido de verdad,
+    // mismo criterio que paintMemory()/paintIc74ls().
+    QFont pinFont = painter->font();
+    pinFont.setPointSizeF(6.5);
+    painter->setFont(pinFont);
+    const QFontMetricsF pinFontMetrics(pinFont);
+    // Debe coincidir con el margen que asume plexerWidth en rebuildPins()
+    // (subido de 2 a 4 - se sentia apretado contra el borde del cuerpo).
+    constexpr qreal labelMargin = 4.0;
+    qreal leftLabelWidth = 0.0;
+    qreal rightLabelWidth = 0.0;
+    for (const components::PinTemplate& pin : pins) {
+        const qreal w = pinFontMetrics.horizontalAdvance(QString::fromStdString(pin.name));
+        if (pin.direction == core::PinDirection::Output) {
+            rightLabelWidth = std::max(rightLabelWidth, w);
+        } else {
+            leftLabelWidth = std::max(leftLabelWidth, w);
+        }
+    }
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(0x8C, 0x8C, 0x8C));
+    for (std::size_t i = 0; i < pins.size(); ++i) {
+        const qreal y = pinLocalPositions_[i].y();
+        const QString name = QString::fromStdString(pins[i].name);
+        if (pins[i].direction == core::PinDirection::Output) {
+            painter->drawText(QRectF(bodyRect.right() - labelMargin - rightLabelWidth, y - 7.0, rightLabelWidth, 14.0),
+                               Qt::AlignVCenter | Qt::AlignRight, name);
+        } else {
+            painter->drawText(QRectF(bodyRect.left() + labelMargin, y - 7.0, leftLabelWidth, 14.0),
+                               Qt::AlignVCenter | Qt::AlignLeft, name);
+        }
     }
 
-    painter->setPen(Qt::black);
-    painter->drawText(bodyRect, Qt::AlignCenter, QString::fromStdString(instance->definition().displayName));
+    // Sigla corta (DEC/MUX/DEMUX/PRI) pegada arriba del cuerpo, en vez del
+    // displayName completo centrado - mismo criterio que paintMemory() (ver
+    // plexerCenterLabel() en MsiShapes.hpp), incluida la posicion fija
+    // arriba en vez de perseguir un hueco entre pines.
+    const QString centerLabel = plexerCenterLabel(typeId);
+    QFont centerFont = painter->font();
+    centerFont.setBold(true);
+    centerFont.setPointSizeF(centerLabel.isEmpty() ? 7.0 : 7.5);
+    const QFontMetricsF centerFontMetrics(centerFont);
+    const qreal centerLabelY = bodyRect.top() + centerFontMetrics.capHeight() / 2.0 + 4.0;
+    painter->setFont(centerFont);
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(0x8C, 0x8C, 0x8C));
+    const QRectF centerRect(bodyRect.left(), centerLabelY - 8.0, bodyRect.width(), 16.0);
+    painter->drawText(centerRect, Qt::AlignCenter,
+                       centerLabel.isEmpty() ? QString::fromStdString(instance->definition().displayName)
+                                              : centerLabel);
+}
+
+void ComponentItem::paintArithmetic(QPainter* painter, bool selected) {
+    const components::ComponentInstance* instance = document_->component(componentId_);
+    const std::string& typeId = instance->typeId();
+    const std::vector<components::PinTemplate>& pins = instance->pins();
+    const QRectF bodyRect(3.0, 6.0, width_ - 6.0, height_ - 12.0);
+
+    painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(20, 20, 20), selected ? 2.0 : 1.5));
+    painter->setBrush(bodyFillColor(*instance, QColor(235, 235, 235)));
+    painter->drawPath(buildMsiShapePath(MsiShapeKind::Rectangle, bodyRect));
+
+    painter->setPen(QPen(QColor(0x8C, 0x8C, 0x8C), 1.5));
+    for (std::size_t i = 0; i < pins.size(); ++i) {
+        const qreal y = pinLocalPositions_[i].y();
+        const bool isOutput = pins[i].direction == core::PinDirection::Output;
+        painter->drawLine(QPointF(isOutput ? width_ : 0.0, y),
+                           QPointF(isOutput ? bodyRect.right() : bodyRect.left(), y));
+    }
+
+    // Nombre de cada pin (A0/B0/Cin/Sum0/Cout/GT/EQ/LT/etc. - antes solo se
+    // veian en el inspector). Ancho de columna medido de verdad, mismo
+    // criterio que paintPlexer()/paintMemory().
+    QFont pinFont = painter->font();
+    pinFont.setPointSizeF(6.5);
+    painter->setFont(pinFont);
+    const QFontMetricsF pinFontMetrics(pinFont);
+    // Debe coincidir con el margen que asume arithmeticWidth en
+    // rebuildPins().
+    constexpr qreal labelMargin = 4.0;
+    qreal leftLabelWidth = 0.0;
+    qreal rightLabelWidth = 0.0;
+    for (const components::PinTemplate& pin : pins) {
+        const qreal w = pinFontMetrics.horizontalAdvance(QString::fromStdString(pin.name));
+        if (pin.direction == core::PinDirection::Output) {
+            rightLabelWidth = std::max(rightLabelWidth, w);
+        } else {
+            leftLabelWidth = std::max(leftLabelWidth, w);
+        }
+    }
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(0x8C, 0x8C, 0x8C));
+    for (std::size_t i = 0; i < pins.size(); ++i) {
+        const qreal y = pinLocalPositions_[i].y();
+        const QString name = QString::fromStdString(pins[i].name);
+        if (pins[i].direction == core::PinDirection::Output) {
+            painter->drawText(QRectF(bodyRect.right() - labelMargin - rightLabelWidth, y - 7.0, rightLabelWidth, 14.0),
+                               Qt::AlignVCenter | Qt::AlignRight, name);
+        } else {
+            painter->drawText(QRectF(bodyRect.left() + labelMargin, y - 7.0, leftLabelWidth, 14.0),
+                               Qt::AlignVCenter | Qt::AlignLeft, name);
+        }
+    }
+
+    // Sigla corta (ADD/SUB/CMP) pegada arriba del cuerpo, en vez del
+    // displayName completo centrado - mismo criterio que paintPlexer()/
+    // paintMemory() (ver arithmeticCenterLabel() en MsiShapes.hpp): con las
+    // columnas de rotulos de pin ahora ocupando los costados, el nombre
+    // completo ("Restador") ya no entra.
+    const QString centerLabel = arithmeticCenterLabel(typeId);
+    QFont centerFont = painter->font();
+    centerFont.setBold(true);
+    centerFont.setPointSizeF(centerLabel.isEmpty() ? 7.0 : 7.5);
+    const QFontMetricsF centerFontMetrics(centerFont);
+    const qreal centerLabelY = bodyRect.top() + centerFontMetrics.capHeight() / 2.0 + 4.0;
+    painter->setFont(centerFont);
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(0x8C, 0x8C, 0x8C));
+    const QRectF centerRect(bodyRect.left(), centerLabelY - 8.0, bodyRect.width(), 16.0);
+    painter->drawText(centerRect, Qt::AlignCenter,
+                       centerLabel.isEmpty() ? QString::fromStdString(instance->definition().displayName)
+                                              : centerLabel);
 }
 
 void ComponentItem::paintMemory(QPainter* painter, bool selected) {

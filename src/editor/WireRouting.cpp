@@ -8,6 +8,29 @@
 
 namespace digitalforge::editor {
 
+namespace {
+// Ruta por defecto entre dos puntos sin ningun quiebre propio (el caso mas
+// comun: un cable recien trazado o reconectado de un tiron, sin arrastrar
+// nada todavia). Antes esto era un solo codo en L (horizontal desde `from`,
+// despues vertical de punta a punta) -- pero todo pin de este simulador sale
+// siempre en horizontal (columna izquierda/derecha del cuerpo, ver
+// ComponentItem::rebuildPins(), no hay ningun tipo con pines arriba/abajo),
+// asi que el tramo final vertical entraba "clavado" contra el costado del
+// componente en vez de acercarse en la misma direccion en que el pin
+// realmente apunta (el defecto reportado). Con dos codos -- S/Z: horizontal,
+// vertical a mitad de camino, horizontal -- el cable sale y entra siempre en
+// horizontal en los dos extremos, que es lo que cualquiera de los dos lados
+// de un pin espera.
+std::vector<QPointF> autoRouteTwoPoints(QPointF from, QPointF to) {
+    if (std::abs(from.y() - to.y()) <= kWireAlignTolerance ||
+        std::abs(from.x() - to.x()) <= kWireAlignTolerance) {
+        return {from, to}; // ya casi alineados: un tramo recto alcanza
+    }
+    const qreal midX = from.x() + (to.x() - from.x()) / 2.0;
+    return {from, QPointF(midX, from.y()), QPointF(midX, to.y()), to};
+}
+} // namespace
+
 qreal distanceToSegment(QPointF p, QPointF a, QPointF b, QPointF* projectionOut) {
     const QPointF ab = b - a;
     const qreal lengthSquared = QPointF::dotProduct(ab, ab);
@@ -26,6 +49,9 @@ qreal distanceToSegment(QPointF p, QPointF a, QPointF b, QPointF* projectionOut)
 std::vector<QPointF> wireVertices(const std::vector<QPointF>& points) {
     if (points.size() < 2) {
         return points;
+    }
+    if (points.size() == 2) {
+        return autoRouteTwoPoints(points.front(), points.back());
     }
     std::vector<QPointF> vertices;
     vertices.reserve(points.size() * 2);

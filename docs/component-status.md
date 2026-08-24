@@ -219,11 +219,19 @@ icono de paleta como en el lienzo. `src/editor/MsiShapes.hpp` (nuevo,
 mismo patron que `GateShapes.hpp`) define las formas compartidas entre
 `ui::IconFactory` y `editor::ComponentItem`:
 
-- Multiplexor/Codificador de prioridad: trapecio "muchos a uno" (ancho del
-  lado de entradas, angosto del lado de salida). Decodificador/
-  Demultiplexor: el trapecio espejado, "uno a muchos".
-- Sumador/Restador/Comparador: rectangulo + un glifo vectorial chico
-  ("+"/"-"/"=").
+- Multiplexor/Decodificador/Demultiplexor/Codificador de prioridad
+  (`plexers.*`): rectangulo liso (no el trapecio ANSI/IEEE original - el lado
+  angosto dejaba menos ancho real que el que usa el rotulado de pines, asi
+  que el texto se salia del contorno), con sigla corta (DEC/MUX/DEMUX/PRI)
+  pegada arriba del cuerpo en vez del nombre completo, rotulo de cada pin
+  (S0/D0/Y0/valid/etc.) a los costados y ancho medido de verdad
+  (`QFontMetricsF`, `isPlexer` en `rebuildPins()`).
+- Sumador/Restador/Comparador (`arithmetic.*`): mismo tratamiento que
+  Plexers - rectangulo liso, sigla corta (ADD/SUB/CMP), rotulo de cada pin
+  (A0/B0/Cin/Sum0/Cout/GT/EQ/LT/etc.) y ancho medido de verdad
+  (`isArithmetic`); reemplaza el glifo vectorial chico ("+"/"-"/"=") y el
+  nombre completo centrado que tenia antes, que dejaban de entrar una vez
+  que las dos columnas de rotulos ocupan los costados.
 - Flip-Flop D/JK/T/Registro: rectangulo + muesca triangular de reloj (solo
   los disparados por flanco - el Latch SR, de nivel, no la tiene). A
   diferencia del resto de los bloques MSI, `memory.*` SI rotula sus pines en
@@ -247,12 +255,12 @@ LED dibuja una grilla real de circulos coloreados en vivo, y la terminal
 muestra el caracter ASCII decodificado del byte actual.
 
 **Fuera de alcance, senalado explicitamente**: de los bloques MSI, solo
-Plexers/Aritmetica/Subcircuitos siguen sin mostrar el nombre de sus pines en
-el lienzo - el `width_` por defecto (32px) no alcanza para texto legible en
-componentes de hasta 130 pines (p. ej. el sumador de 64 bits); requeriria
-repensar el sizing de `ComponentItem::rebuildPins()`, un cambio aparte.
-Memoria (`memory.*`) ya lo hace, con su propio ancho de 48px (`isMemory` en
-`rebuildPins()`) - ver el parrafo de arriba.
+Subcircuitos sigue sin mostrar el nombre de sus pines en el lienzo (los
+pines de un subcircuito son arbitrarios, definidos por su documento embebido,
+asi que el mismo tratamiento medido de verdad aplicaria igual - no se hizo
+todavia). Memoria/Plexers/Aritmetica ya lo hacen, cada uno con su propio
+ancho medido de verdad en vez del generico 32px (`isMemory`/`isPlexer`/
+`isArithmetic` en `rebuildPins()`) - ver el parrafo de arriba.
 
 ## Driver BCD y color configurable (E/S)
 
@@ -284,12 +292,11 @@ Memoria (`memory.*`) ya lo hace, con su propio ancho de 48px (`isMemory` en
   muesca semicircular concava de "pin 1" (un recorte real, no un bulto -
   se "borra" el tramo del borde con un chord del color de fondo antes de
   dibujar el arco), y el nombre de cada pin (`bit0..bit3` a la izquierda,
-  `a..g` a la derecha) - a diferencia de Plexers/Aritmetica/Memoria/
-  Subcircuitos (ver la nota de alcance de mas arriba), ic74ls.* si muestra
-  etiquetas de pin: gana su propio ancho (90px, no el generico 32px) y su
-  propio pitch vertical entre pines (16px, el doble del generico 8px) para
-  que hasta 7 etiquetas por lado (`a..g`) no queden amontonadas ni se
-  superpongan entre si.
+  `a..g` a la derecha) - mismo criterio de rotulado que Plexers/Aritmetica/
+  Memoria (ver la nota de alcance de mas arriba), con su propio ancho (90px,
+  no el generico 32px) y su propio pitch vertical entre pines (16px, el
+  doble del generico 8px) para que hasta 7 etiquetas por lado (`a..g`) no
+  queden amontonadas ni se superpongan entre si.
 
 ## Area de interaccion de los componentes (hit-testing)
 

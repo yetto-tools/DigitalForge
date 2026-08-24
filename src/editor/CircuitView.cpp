@@ -24,6 +24,18 @@ CircuitView::CircuitView(CircuitScene* scene, QWidget* parent) : QGraphicsView(s
     setResizeAnchor(QGraphicsView::AnchorViewCenter);
     setMouseTracking(true);
     setAcceptDrops(true);
+    // MinimalViewportUpdate (el modo por defecto) redibuja cada rectangulo
+    // sucio por separado usando el arbol BSP de la escena - con muchos
+    // WireItem cambiando de forma en el mismo frame (todos los cables de un
+    // componente al arrastrarlo), esa union de regiones desconectadas dejaba
+    // franjas sin invalidar (el defecto reportado: lineas de cable "fantasma"
+    // que quedaban pegadas en la posicion vieja hasta que un cambio de zoom
+    // forzaba un repintado completo). BoundingRectViewportUpdate calcula un
+    // unico rectangulo que envuelve TODAS las regiones sucias del frame y
+    // repinta eso entero - mas costoso por frame, pero el lienzo no maneja
+    // volumenes de items que lo vuelvan perceptible, y elimina esta clase de
+    // artefacto por completo en vez de parchear caso por caso.
+    setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);
 }
 
 qreal CircuitView::zoomFactor() const { return transform().m11(); }

@@ -73,4 +73,29 @@ enum class MsiShapeKind { Rectangle, FanInTrapezoid, FanOutTrapezoid };
     return QString();
 }
 
+// Sigla corta para el centro del cuerpo de un bloque plexers.* (ver
+// ComponentItem::paintPlexer()) o su icono chico de paleta - mismo motivo
+// que memoryCenterLabel() de arriba: el displayName completo
+// ("Codificador de prioridad") no entra en un cuerpo angosto ni en un
+// icono de paleta.
+[[nodiscard]] inline QString plexerCenterLabel(const std::string& typeId) {
+    if (typeId == "plexers.decoder") return QStringLiteral("DEC");
+    if (typeId == "plexers.multiplexer") return QStringLiteral("MUX");
+    if (typeId == "plexers.demultiplexer") return QStringLiteral("DEMUX");
+    if (typeId == "plexers.priorityEncoder") return QStringLiteral("PRI");
+    return QString();
+}
+
+// Sigla corta para el centro del cuerpo de un bloque arithmetic.* (ver
+// ComponentItem::paintArithmetic()) - mismo motivo que plexerCenterLabel() de
+// arriba: el displayName completo ("Restador") no entra en el cuerpo angosto
+// una vez que este tambien rotula sus pines (A0/B0/Sum0/Cin/etc.) a los
+// costados.
+[[nodiscard]] inline QString arithmeticCenterLabel(const std::string& typeId) {
+    if (typeId == "arithmetic.adder") return QStringLiteral("ADD");
+    if (typeId == "arithmetic.subtractor") return QStringLiteral("SUB");
+    if (typeId == "arithmetic.comparator") return QStringLiteral("CMP");
+    return QString();
+}
+
 } // namespace digitalforge::editor
