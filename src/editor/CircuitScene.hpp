@@ -121,6 +121,12 @@ signals:
     // consumido por tryToggleInput()). MainWindow la usa para abrir el
     // dialogo modal de Propiedades.
     void componentDoubleClicked(uint32_t componentId);
+    // Emitida al hacer doble clic sobre un JunctionItem en modo Seleccion.
+    // MainWindow la usa para mostrar informacion del punto de union
+    // (posicion, valor logico, conexiones) -- mismo gesto que
+    // componentDoubleClicked(), pero un punto de union no tiene propiedades
+    // editables, asi que no abre el dialogo de Propiedades.
+    void junctionDoubleClicked(uint32_t junctionId);
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override;

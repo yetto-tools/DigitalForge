@@ -32,6 +32,7 @@ public:
     void addNewDocument();
     void addNewKarnaughDocument();
     void addNewTruthTableDocument();
+    void addNewExcitationTableDocument();
 
 signals:
     // Un mapa de Karnaugh no tiene "documento activo" en editor::Project
@@ -43,6 +44,8 @@ signals:
     void karnaughDocumentActivationRequested(uint32_t id);
     // Mirror de la de arriba, para una tabla de verdad.
     void truthTableDocumentActivationRequested(uint32_t id);
+    // Mirror de las dos de arriba, para una tabla de excitacion.
+    void excitationTableDocumentActivationRequested(uint32_t id);
 
 protected:
     // Intercepta F2 sobre tree_ (instalado como event filter) para
@@ -59,7 +62,7 @@ private slots:
 private:
     void importDocument();
     void exportDocument(uint32_t id);
-    // Las dos de abajo actuan sobre CUALQUIERA de los tres tipos de
+    // Las dos de abajo actuan sobre CUALQUIERA de los cuatro tipos de
     // documento -- consultan project_->documentKind(id) internamente y
     // llaman al metodo de Project que corresponda, para que
     // onItemClicked()/el menu contextual/F2 no necesiten saber que tipo de

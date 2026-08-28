@@ -43,6 +43,8 @@ ProjectTree::ProjectTree(editor::Project* project, QWidget* parent) : QWidget(pa
     connect(project_, &editor::Project::karnaughDocumentRenamed, this, [this](uint32_t) { repopulate(); });
     connect(project_, &editor::Project::truthTableDocumentAdded, this, [this](uint32_t) { repopulate(); });
     connect(project_, &editor::Project::truthTableDocumentRenamed, this, [this](uint32_t) { repopulate(); });
+    connect(project_, &editor::Project::excitationTableDocumentAdded, this, [this](uint32_t) { repopulate(); });
+    connect(project_, &editor::Project::excitationTableDocumentRenamed, this, [this](uint32_t) { repopulate(); });
     // Los tres "AboutToBeRemoved" se emiten ANTES de borrar la entrada de
     // Project (para que MainWindow pueda limpiar su vista/pestana mientras
     // el id todavia resuelve) -- repopulate() en ese mismo instante releeria
@@ -58,6 +60,8 @@ ProjectTree::ProjectTree(editor::Project* project, QWidget* parent) : QWidget(pa
             Qt::QueuedConnection);
     connect(project_, &editor::Project::truthTableDocumentAboutToBeRemoved, this, [this](uint32_t) { repopulate(); },
             Qt::QueuedConnection);
+    connect(project_, &editor::Project::excitationTableDocumentAboutToBeRemoved, this,
+            [this](uint32_t) { repopulate(); }, Qt::QueuedConnection);
     // El nombre/ruta del proyecto (raiz del arbol) solo cambia con
     // Guardar/Guardar como/Abrir - ninguno de esos toca un documento
     // puntual, asi que no dispara ninguna de las senales de arriba.
@@ -82,6 +86,11 @@ void ProjectTree::repopulate() {
     for (const uint32_t id : project_->truthTableDocumentIds()) {
         auto* item =
             new QTreeWidgetItem(rootItem_, {tr("%1 (Tabla de verdad)").arg(project_->truthTableDocumentName(id))});
+        item->setData(0, kDocumentIdRole, id);
+    }
+    for (const uint32_t id : project_->excitationTableDocumentIds()) {
+        auto* item = new QTreeWidgetItem(
+            rootItem_, {tr("%1 (Tabla de excitacion)").arg(project_->excitationTableDocumentName(id))});
         item->setData(0, kDocumentIdRole, id);
     }
     rootItem_->setExpanded(true);
@@ -151,6 +160,9 @@ void ProjectTree::onItemClicked(QTreeWidgetItem* item, int) {
             case editor::Project::DocumentKind::TruthTable:
                 emit truthTableDocumentActivationRequested(id);
                 return;
+            case editor::Project::DocumentKind::ExcitationTable:
+                emit excitationTableDocumentActivationRequested(id);
+                return;
             case editor::Project::DocumentKind::Circuit:
                 project_->setActiveDocument(id);
                 return;
@@ -172,6 +184,7 @@ void ProjectTree::onContextMenuRequested(const QPoint& pos) {
         menu.addAction(tr("Agregar documento nuevo"), this, &ProjectTree::addNewDocument);
         menu.addAction(tr("Agregar mapa de Karnaugh nuevo"), this, &ProjectTree::addNewKarnaughDocument);
         menu.addAction(tr("Agregar tabla de verdad nueva"), this, &ProjectTree::addNewTruthTableDocument);
+        menu.addAction(tr("Agregar tabla de excitacion nueva"), this, &ProjectTree::addNewExcitationTableDocument);
         menu.addAction(tr("Importar documento existente..."), this, &ProjectTree::importDocument);
     } else {
         const uint32_t id = item->data(0, kDocumentIdRole).toUInt();
@@ -249,6 +262,20 @@ void ProjectTree::addNewTruthTableDocument() {
     }
 }
 
+void ProjectTree::addNewExcitationTableDocument() {
+    const QString suggestedName = project_->suggestUniqueDocumentName(tr("Tabla de excitacion"));
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Nueva tabla de excitacion"), tr("Nombre:"),
+                                                QLineEdit::Normal, suggestedName, &ok);
+    if (ok && !name.isEmpty()) {
+        try {
+            project_->addExcitationTableDocument(name);
+        } catch (const std::exception& error) {
+            QMessageBox::warning(this, tr("No se pudo agregar"), QString::fromUtf8(error.what()));
+        }
+    }
+}
+
 void ProjectTree::importDocument() {
     const QString path =
         QFileDialog::getOpenFileName(this, tr("Importar documento"), QString(), tr("Documentos DigitalForge (*.dfc)"));
@@ -292,6 +319,9 @@ void ProjectTree::renameDocument(uint32_t id, QTreeWidgetItem* item) {
         case editor::Project::DocumentKind::TruthTable:
             currentName = project_->truthTableDocumentName(id);
             break;
+        case editor::Project::DocumentKind::ExcitationTable:
+            currentName = project_->excitationTableDocumentName(id);
+            break;
     }
     bool ok = false;
     const QString name =
@@ -307,6 +337,9 @@ void ProjectTree::renameDocument(uint32_t id, QTreeWidgetItem* item) {
                     break;
                 case editor::Project::DocumentKind::TruthTable:
                     project_->renameTruthTableDocument(id, name);
+                    break;
+                case editor::Project::DocumentKind::ExcitationTable:
+                    project_->renameExcitationTableDocument(id, name);
                     break;
             }
         } catch (const std::exception& error) {
@@ -331,6 +364,9 @@ void ProjectTree::removeDocument(uint32_t id) {
                 break;
             case editor::Project::DocumentKind::TruthTable:
                 project_->removeTruthTableDocument(id);
+                break;
+            case editor::Project::DocumentKind::ExcitationTable:
+                project_->removeExcitationTableDocument(id);
                 break;
         }
     } catch (const std::exception& error) {

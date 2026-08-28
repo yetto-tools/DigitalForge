@@ -11,10 +11,12 @@
 #include <stdexcept>
 
 #include "CircuitDocument.hpp"
+#include "ExcitationTableDocument.hpp"
 #include "KarnaughDocument.hpp"
 #include "TruthTableDocument.hpp"
 #include "components/BasicComponentLibrary.hpp"
 #include "core/Version.hpp"
+#include "formats/ExcitationTableSerializer.hpp"
 #include "formats/KarnaughSerializer.hpp"
 #include "formats/LockFile.hpp"
 #include "formats/LogisimImporter.hpp"
@@ -86,10 +88,19 @@ void Project::clearAllTruthTableDocuments() {
     truthTableOrder_.clear();
 }
 
+void Project::clearAllExcitationTableDocuments() {
+    for (auto it = excitationTableDocuments_.begin(); it != excitationTableDocuments_.end();) {
+        emit excitationTableDocumentAboutToBeRemoved(it->first);
+        it = excitationTableDocuments_.erase(it);
+    }
+    excitationTableOrder_.clear();
+}
+
 void Project::newProject() {
     clearAllDocuments();
     clearAllKarnaughDocuments();
     clearAllTruthTableDocuments();
+    clearAllExcitationTableDocuments();
     nextId_ = 0;
     projectFilePath_.clear();
     projectName_.clear();
@@ -147,6 +158,20 @@ uint32_t Project::addTruthTableEntry(const QString& name, const QString& absolut
     return id;
 }
 
+uint32_t Project::addExcitationTableEntry(const QString& name, const QString& absolutePath, int stateBitCount) {
+    ExcitationTableEntry entry;
+    entry.name = name;
+    entry.absolutePath = absolutePath;
+    entry.document = std::make_unique<ExcitationTableDocument>();
+    entry.document->reset(stateBitCount);
+
+    const uint32_t id = nextId_++; // mismo contador que addEntry()/addKarnaughEntry()/addTruthTableEntry()
+    excitationTableDocuments_[id] = std::move(entry);
+    excitationTableOrder_.push_back(id);
+    emit excitationTableDocumentAdded(id);
+    return id;
+}
+
 void Project::refreshSiblingResolvers() {
     // Cada CircuitDocument recibe una lambda que busca en documents_ *en el
     // momento en que se la invoca* (no una foto de ahora) - por eso no
@@ -195,9 +220,17 @@ bool Project::hasDocumentNamed(const QString& name, std::optional<uint32_t> excl
             return true;
         }
     }
-    // Mismo espacio de nombres para las tres colecciones -- ver el
+    // Mismo espacio de nombres para las cuatro colecciones -- ver el
     // comentario del bucle de arriba.
     for (const auto& [id, entry] : truthTableDocuments_) {
+        if (excludeId.has_value() && id == *excludeId) {
+            continue;
+        }
+        if (entry.name.compare(name, Qt::CaseInsensitive) == 0) {
+            return true;
+        }
+    }
+    for (const auto& [id, entry] : excitationTableDocuments_) {
         if (excludeId.has_value() && id == *excludeId) {
             continue;
         }
@@ -396,6 +429,45 @@ QString Project::truthTableDocumentName(uint32_t id) const { return truthTableDo
 
 std::vector<uint32_t> Project::truthTableDocumentIds() const { return truthTableOrder_; }
 
+uint32_t Project::addExcitationTableDocument(const QString& name, int stateBitCount) {
+    if (hasDocumentNamed(name)) {
+        throw std::invalid_argument("addExcitationTableDocument: ya existe un documento llamado '" +
+                                     name.toStdString() + "'");
+    }
+    const uint32_t id = addExcitationTableEntry(name, QString(), stateBitCount);
+    manifestDirty_ = true;
+    return id;
+}
+
+void Project::removeExcitationTableDocument(uint32_t id) {
+    const auto it = excitationTableDocuments_.find(id);
+    if (it == excitationTableDocuments_.end()) {
+        throw std::invalid_argument("removeExcitationTableDocument: documento desconocido");
+    }
+    emit excitationTableDocumentAboutToBeRemoved(id);
+    excitationTableDocuments_.erase(it);
+    excitationTableOrder_.erase(std::find(excitationTableOrder_.begin(), excitationTableOrder_.end(), id));
+    manifestDirty_ = true;
+}
+
+void Project::renameExcitationTableDocument(uint32_t id, const QString& newName) {
+    if (hasDocumentNamed(newName, id)) {
+        throw std::invalid_argument("renameExcitationTableDocument: ya existe un documento llamado '" +
+                                     newName.toStdString() + "'");
+    }
+    excitationTableDocuments_.at(id).name = newName;
+    manifestDirty_ = true;
+    emit excitationTableDocumentRenamed(id);
+}
+
+ExcitationTableDocument* Project::excitationTableDocument(uint32_t id) const {
+    return excitationTableDocuments_.at(id).document.get();
+}
+
+QString Project::excitationTableDocumentName(uint32_t id) const { return excitationTableDocuments_.at(id).name; }
+
+std::vector<uint32_t> Project::excitationTableDocumentIds() const { return excitationTableOrder_; }
+
 Project::DocumentKind Project::documentKind(uint32_t id) const {
     if (documents_.contains(id)) {
         return DocumentKind::Circuit;
@@ -405,6 +477,9 @@ Project::DocumentKind Project::documentKind(uint32_t id) const {
     }
     if (truthTableDocuments_.contains(id)) {
         return DocumentKind::TruthTable;
+    }
+    if (excitationTableDocuments_.contains(id)) {
+        return DocumentKind::ExcitationTable;
     }
     throw std::invalid_argument("documentKind: id desconocido");
 }
@@ -452,6 +527,11 @@ bool Project::hasUnsavedChanges() const {
             return true;
         }
     }
+    for (const auto& [id, entry] : excitationTableDocuments_) {
+        if (entry.document->dirty()) {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -466,6 +546,7 @@ void Project::loadFromFile(const QString& path) {
     clearAllDocuments();
     clearAllKarnaughDocuments();
     clearAllTruthTableDocuments();
+    clearAllExcitationTableDocuments();
     nextId_ = 0;
 
     const QDir baseDir = QFileInfo(path).absoluteDir();
@@ -552,6 +633,20 @@ void Project::loadFromFile(const QString& path) {
             formats::loadTruthTableDocumentFromFile(*truthTableDocuments_.at(id).document, absPath.toStdString());
             truthTableDocuments_.at(id).document->markClean();
         }
+
+        for (const formats::ProjectManifestEntry& docEntry : manifest.documents) {
+            if (docEntry.kind != QStringLiteral("excitation")) {
+                continue;
+            }
+            const QString absPath = baseDir.filePath(docEntry.relativePath);
+            // 2 es solo un valor de arranque: loadExcitationTableDocumentFromFile()
+            // llama a ExcitationTableDocument::reset() con el stateBitCount
+            // real guardado antes de leer ninguna celda.
+            const uint32_t id = addExcitationTableEntry(docEntry.name, absPath, 2);
+            formats::loadExcitationTableDocumentFromFile(*excitationTableDocuments_.at(id).document,
+                                                          absPath.toStdString());
+            excitationTableDocuments_.at(id).document->markClean();
+        }
     } else {
         projectName_.clear();
         const uint32_t id = addEntry(QFileInfo(path).completeBaseName(), path);
@@ -613,6 +708,14 @@ void Project::saveToFile(const QString& path) {
         formats::saveTruthTableDocumentToFile(*entry.document, entry.absolutePath.toStdString());
         entry.document->markClean();
     }
+    for (const uint32_t id : excitationTableOrder_) {
+        ExcitationTableEntry& entry = excitationTableDocuments_.at(id);
+        if (entry.absolutePath.isEmpty() || isNewLocation) {
+            entry.absolutePath = projectDir.filePath(entry.name + ".dfe");
+        }
+        formats::saveExcitationTableDocumentToFile(*entry.document, entry.absolutePath.toStdString());
+        entry.document->markClean();
+    }
 
     if (manifestDirty_ || isNewLocation) {
         formats::ProjectManifest manifest;
@@ -645,6 +748,15 @@ void Project::saveToFile(const QString& path) {
             manifestEntry.name = entry.name;
             manifestEntry.relativePath = projectDir.relativeFilePath(entry.absolutePath);
             manifestEntry.kind = QStringLiteral("truthtable");
+            manifest.documents.push_back(std::move(manifestEntry));
+        }
+        // Las tablas de excitacion van al final, por la misma razon.
+        for (const uint32_t id : excitationTableOrder_) {
+            const ExcitationTableEntry& entry = excitationTableDocuments_.at(id);
+            formats::ProjectManifestEntry manifestEntry;
+            manifestEntry.name = entry.name;
+            manifestEntry.relativePath = projectDir.relativeFilePath(entry.absolutePath);
+            manifestEntry.kind = QStringLiteral("excitation");
             manifest.documents.push_back(std::move(manifestEntry));
         }
 

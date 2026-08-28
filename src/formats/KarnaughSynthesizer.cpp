@@ -16,6 +16,7 @@ namespace digitalforge::formats {
 
 using editor::CircuitDocument;
 using editor::ComponentPlacement;
+using editor::FlipFlopType;
 using editor::Implicant;
 using editor::KarnaughLiteral;
 using editor::KarnaughResult;
@@ -118,6 +119,22 @@ public:
         }
     }
 
+    // Variante para sintesis SECUENCIAL (ver synthesizeSequentialCircuit()):
+    // en vez de crear un wiring.input por variable, la red verdadera/negada
+    // de cada una arranca directo en el Q/Q' de un flip-flop YA COLOCADO
+    // (`presentPins`/`negatedPins`, mismo orden, y `presentRows` con la fila
+    // de escena real de cada flip-flop para que wireNet() calcule bien sus
+    // jogs) -- las variables de estado realimentan sin sintetizar ningun
+    // inversor, Q' ya es una salida real del componente.
+    SharedInputState(CircuitDocument& target, const std::vector<PinRef>& presentPins,
+                      const std::vector<PinRef>& negatedPins, const std::vector<qreal>& presentRows)
+        : target_(target), trueNet_(presentPins.size()), negatedNet_(presentPins.size()) {
+        for (std::size_t i = 0; i < presentPins.size(); ++i) {
+            trueNet_[i].push_back(NetPin{presentPins[i], presentRows[i]});
+            negatedNet_[i] = std::vector<NetPin>{NetPin{negatedPins[i], presentRows[i]}};
+        }
+    }
+
     std::vector<NetPin>& trueNetFor(int variableIndex) { return trueNet_[static_cast<std::size_t>(variableIndex)]; }
 
     std::vector<NetPin>& negatedNetFor(int variableIndex) {
@@ -164,15 +181,26 @@ qreal outputBandHeight(const KarnaughResult& result) {
 // fila de una salida y la primera de la siguiente quedarian pegadas.
 constexpr qreal kOutputBandGap = kRowSpacing;
 
-// Arma las columnas 2 (terminos AND/constante), 3 (combinacion OR) y 4
-// (wiring.output llamada `outputName`) de UNA salida -- exactamente la
-// misma topologia que antes tenia synthesizeToCircuit() completo, corrida
-// `rowBandOffset` hacia abajo y agregando sus consumidores a las redes
-// COMPARTIDAS de `shared` en vez de a unas propias (esa es la unica
-// diferencia real respecto de la version de una sola salida: la columna 0/1
-// no se repite, se le suman consumidores a la que ya existe).
-void synthesizeOutputColumns(CircuitDocument& target, const KarnaughResult& result, const QString& outputName,
-                              qreal rowBandOffset, SharedInputState& shared, const SynthesisOptions& options) {
+// Fila (Y de escena) donde se combinan los terminos de una salida (columna
+// OR/constante/termino unico) -- centrada en la banda de grupos
+// seleccionados, o al arranque de la banda si no hay ninguno. Compartida por
+// synthesizeOutputColumns() (para posicionar su propia wiring.output) y
+// synthesizeOutputColumnsToPin() (para el mismo calculo, cuando el destino
+// ya es un pin existente en vez de una wiring.output nueva).
+qreal computeOutputRow(qreal rowBandOffset, const KarnaughResult& result) {
+    return rowBandOffset + (result.selectedGroups.empty()
+                                 ? 0.0
+                                 : (static_cast<qreal>(result.selectedGroups.size() - 1) / 2.0) * kRowSpacing);
+}
+
+// Arma las columnas 2 (terminos AND/constante) y 3 (combinacion OR) de UNA
+// salida y cablea el resultado final a `targetPin` (ya existente, en la fila
+// `targetRow`) -- el nucleo compartido entre synthesizeOutputColumns() (crea
+// su propia wiring.output) y synthesizeSequentialCircuit() (el destino es la
+// entrada de un flip-flop ya colocado).
+void synthesizeOutputColumnsToPin(CircuitDocument& target, const KarnaughResult& result, PinRef targetPin,
+                                   qreal rowBandOffset, qreal targetRow, SharedInputState& shared,
+                                   const SynthesisOptions& options) {
     // Columna 2: un termino por grupo seleccionado. `termSource[g]` es el
     // pin (o, para terminos de 1 literal, ninguno - se consume directo de
     // trueNet/negatedNet) que un consumidor de ese termino debe cablear.
@@ -249,36 +277,25 @@ void synthesizeOutputColumns(CircuitDocument& target, const KarnaughResult& resu
     };
 
     // Columna 3: combina los terminos. Sin terminos -> constante 0 directo
-    // a la salida; un termino -> se cablea directo (sin gates.or); 2+ ->
-    // una gates.or.
-    const qreal outputRow = rowBandOffset + (result.selectedGroups.empty()
-                                                  ? 0.0
-                                                  : (static_cast<qreal>(result.selectedGroups.size() - 1) / 2.0) *
-                                                        kRowSpacing);
-    components::PropertyMap outputOverrides;
-    outputOverrides["label"] = components::PropertyValue{outputName.toStdString()};
-    ComponentPlacement outputPlacement;
-    outputPlacement.position = QPointF(4 * kColumnSpacing, outputRow);
-    const uint32_t outputId = target.addComponent("wiring.output", outputOverrides, outputPlacement);
-    const PinRef outputPin{outputId, 0};
-
+    // al destino; un termino -> se cablea directo (sin gates.or); 2+ -> una
+    // gates.or.
     if (termSources.empty()) {
         ComponentPlacement placement;
-        placement.position = QPointF(3 * kColumnSpacing, outputRow);
+        placement.position = QPointF(3 * kColumnSpacing, targetRow);
         components::PropertyMap overrides;
         overrides["value"] = components::PropertyValue{std::string("0")};
         const uint32_t constId = target.addComponent("wiring.constant", overrides, placement);
-        target.addWire(PinRef{constId, 0}, outputPin);
+        target.addWire(PinRef{constId, 0}, targetPin);
     } else if (termSources.size() == 1) {
         const TermSource& term = termSources.front();
         if (term.ownNet.has_value()) {
-            target.addWire(*term.ownNet, outputPin);
+            target.addWire(*term.ownNet, targetPin);
         } else {
-            consumeTerm(term, outputPin, outputRow);
+            consumeTerm(term, targetPin, targetRow);
         }
     } else {
         ComponentPlacement placement;
-        placement.position = QPointF(3 * kColumnSpacing, outputRow);
+        placement.position = QPointF(3 * kColumnSpacing, targetRow);
         components::PropertyMap overrides;
         overrides["inputCount"] = components::PropertyValue{static_cast<uint64_t>(termSources.size())};
         const uint32_t orId = target.addComponent("gates.or", overrides, placement);
@@ -288,11 +305,26 @@ void synthesizeOutputColumns(CircuitDocument& target, const KarnaughResult& resu
             if (term.ownNet.has_value()) {
                 target.addWire(*term.ownNet, inputPin);
             } else {
-                consumeTerm(term, inputPin, outputRow);
+                consumeTerm(term, inputPin, targetRow);
             }
         }
-        target.addWire(PinRef{orId, static_cast<uint16_t>(termSources.size())}, outputPin);
+        target.addWire(PinRef{orId, static_cast<uint16_t>(termSources.size())}, targetPin);
     }
+}
+
+// Crea la wiring.output llamada `outputName` de UNA salida y delega en
+// synthesizeOutputColumnsToPin() para el resto -- mismo comportamiento de
+// siempre para la sintesis puramente combinacional
+// (synthesizeMultiOutputToCircuit()).
+void synthesizeOutputColumns(CircuitDocument& target, const KarnaughResult& result, const QString& outputName,
+                              qreal rowBandOffset, SharedInputState& shared, const SynthesisOptions& options) {
+    const qreal outputRow = computeOutputRow(rowBandOffset, result);
+    components::PropertyMap outputOverrides;
+    outputOverrides["label"] = components::PropertyValue{outputName.toStdString()};
+    ComponentPlacement outputPlacement;
+    outputPlacement.position = QPointF(4 * kColumnSpacing, outputRow);
+    const uint32_t outputId = target.addComponent("wiring.output", outputOverrides, outputPlacement);
+    synthesizeOutputColumnsToPin(target, result, PinRef{outputId, 0}, rowBandOffset, outputRow, shared, options);
 }
 
 void validateResult(int variableCount, const KarnaughResult& result) {
@@ -338,6 +370,130 @@ void synthesizeMultiOutputToCircuit(CircuitDocument& target, int variableCount,
     // conocidos, se cablean las redes de cada variable (verdadera y, si se
     // creo, negada) -- ver el comentario de clase de SharedInputState.
     shared.wireAll(variableCount);
+}
+
+namespace {
+
+// Que pin de memory.dFlipFlop/tFlipFlop/jkFlipFlop es cual, con
+// preset/clear asincronos DESACTIVADO (synthesizeSequentialCircuit() nunca
+// lo activa) -- ver BasicComponentLibrary.cpp: makeDFlipFlopDefinition()/
+// makeJkFlipFlopDefinition()/makeTFlipFlopDefinition().
+struct FlipFlopPins {
+    const char* typeId;
+    uint16_t dataPin;  // D, T, o J (K = dataPin+1 para JK)
+    uint16_t clkPin;
+    uint16_t qPin;
+    uint16_t qnPin;
+};
+
+FlipFlopPins pinsFor(FlipFlopType type) {
+    switch (type) {
+        case FlipFlopType::D:
+            return FlipFlopPins{"memory.dFlipFlop", 0, 1, 2, 3};
+        case FlipFlopType::T:
+            return FlipFlopPins{"memory.tFlipFlop", 0, 1, 2, 3};
+        case FlipFlopType::JK:
+            return FlipFlopPins{"memory.jkFlipFlop", 0, 2, 3, 4};
+        case FlipFlopType::SR:
+            break; // se rechaza antes de llegar aca -- ver synthesizeSequentialCircuit()
+    }
+    throw std::invalid_argument(
+        "synthesizeSequentialCircuit: no hay un componente de flip-flop SR con reloj en la biblioteca -- elegi D, "
+        "T o JK");
+}
+
+} // namespace
+
+void synthesizeSequentialCircuit(CircuitDocument& target, const std::vector<FlipFlopSpec>& flipFlops,
+                                  const SynthesisOptions& options) {
+    if (flipFlops.empty()) {
+        throw std::invalid_argument("synthesizeSequentialCircuit: flipFlops no puede estar vacio");
+    }
+    const int stateBitCount = static_cast<int>(flipFlops.size());
+    for (const FlipFlopSpec& spec : flipFlops) {
+        // Validado ANTES de tocar `target`: si algun bit usa SR (sin
+        // componente con reloj en la biblioteca), el resto de la validacion
+        // corre igual (para reportar todos los problemas de una), pero nada
+        // se llega a colocar.
+        if (spec.type == FlipFlopType::SR) {
+            throw std::invalid_argument(
+                "synthesizeSequentialCircuit: no hay un componente de flip-flop SR con reloj en la biblioteca -- "
+                "elegi D, T o JK para el bit '" +
+                spec.bitName.toStdString() + "'");
+        }
+        const std::size_t expectedResults = spec.type == FlipFlopType::JK ? 2 : 1;
+        if (spec.excitationResults.size() != expectedResults) {
+            throw std::invalid_argument("synthesizeSequentialCircuit: excitationResults.size() no coincide con el "
+                                         "tipo de flip-flop del bit '" +
+                                         spec.bitName.toStdString() + "'");
+        }
+        for (const KarnaughResult& result : spec.excitationResults) {
+            validateResult(stateBitCount, result);
+        }
+    }
+
+    target.clear();
+
+    // Un unico reloj compartido, colocado por encima de la primera banda,
+    // cableado a cada CLK mas abajo (un pin admite varios cables directos,
+    // todos fundidos a la misma red -- no hace falta ningun punto de union).
+    ComponentPlacement clockPlacement;
+    clockPlacement.position = QPointF(4 * kColumnSpacing, -kRowSpacing * 1.5);
+    const uint32_t clockId = target.addComponent("wiring.clock", {}, clockPlacement);
+    const PinRef clockPin{clockId, 0};
+
+    // Un flip-flop por bit, en la columna donde synthesizeOutputColumns()
+    // pondria su wiring.output -- Q/Q' quedan disponibles de inmediato como
+    // variable verdadera/negada de la logica de excitacion de CUALQUIER bit
+    // (realimentacion), sin sintetizar ningun inversor.
+    struct Placed {
+        FlipFlopPins pins;
+        uint32_t componentId = 0;
+        qreal row = 0.0;
+    };
+    std::vector<Placed> placed;
+    placed.reserve(flipFlops.size());
+    std::vector<PinRef> qPins;
+    std::vector<PinRef> qnPins;
+    std::vector<qreal> rows;
+    qreal rowBandOffset = 0.0;
+    for (const FlipFlopSpec& spec : flipFlops) {
+        const FlipFlopPins pins = pinsFor(spec.type);
+        components::PropertyMap overrides;
+        overrides["label"] = components::PropertyValue{spec.bitName.toStdString()};
+        ComponentPlacement placement;
+        placement.position = QPointF(4 * kColumnSpacing, rowBandOffset);
+        const uint32_t componentId = target.addComponent(pins.typeId, overrides, placement);
+        target.addWire(clockPin, PinRef{componentId, pins.clkPin});
+
+        placed.push_back(Placed{pins, componentId, rowBandOffset});
+        qPins.push_back(PinRef{componentId, pins.qPin});
+        qnPins.push_back(PinRef{componentId, pins.qnPin});
+        rows.push_back(rowBandOffset);
+
+        qreal bandHeight = 0.0;
+        for (const KarnaughResult& result : spec.excitationResults) {
+            bandHeight = std::max(bandHeight, outputBandHeight(result));
+        }
+        rowBandOffset += bandHeight + kOutputBandGap;
+    }
+
+    SharedInputState shared(target, qPins, qnPins, rows);
+
+    for (std::size_t i = 0; i < flipFlops.size(); ++i) {
+        const FlipFlopSpec& spec = flipFlops[i];
+        const Placed& entry = placed[i];
+        // D/T: un unico resultado -> dataPin. JK: dos resultados {J,K} ->
+        // dataPin y dataPin+1 respectivamente.
+        for (std::size_t r = 0; r < spec.excitationResults.size(); ++r) {
+            const KarnaughResult& result = spec.excitationResults[r];
+            const PinRef targetPin{entry.componentId, static_cast<uint16_t>(entry.pins.dataPin + r)};
+            const qreal targetRow = computeOutputRow(entry.row, result);
+            synthesizeOutputColumnsToPin(target, result, targetPin, entry.row, targetRow, shared, options);
+        }
+    }
+
+    shared.wireAll(stateBitCount);
 }
 
 void synthesizeToCircuit(CircuitDocument& target, const KarnaughResult& result, const SynthesisOptions& options) {

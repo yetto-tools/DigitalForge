@@ -32,12 +32,15 @@ class CircuitScene;
 class CircuitView;
 class KarnaughDocument;
 class TruthTableDocument;
+class ExcitationTableDocument;
 class Project;
+struct WireEndpoint;
 } // namespace digitalforge::editor
 
 namespace digitalforge::ui {
 class AutoHideStrip;
 class ComponentPalette;
+class ExcitationTableView;
 class KarnaughMapView;
 class MiniMapView;
 class ProjectTree;
@@ -110,6 +113,13 @@ private slots:
     void onTruthTableDocumentAboutToBeRemoved(uint32_t id);
     void onTruthTableDocumentRenamed(uint32_t id);
     void onTruthTableDocumentActivationRequested(uint32_t id);
+    // Mirror de los cuatro de arriba, para las tablas de excitacion del
+    // proyecto -- excitationTableViews_ es a ui::ExcitationTableView lo que
+    // truthTableViews_ es a ui::TruthTableView.
+    void onExcitationTableDocumentAdded(uint32_t id);
+    void onExcitationTableDocumentAboutToBeRemoved(uint32_t id);
+    void onExcitationTableDocumentRenamed(uint32_t id);
+    void onExcitationTableDocumentActivationRequested(uint32_t id);
     void onAbout();
     // Chequeo manual de actualizaciones (menu Ayuda): a diferencia del
     // automatico al arrancar, este si avisa cuando ya estas al dia o cuando
@@ -133,6 +143,10 @@ private slots:
     // CircuitScene::componentDoubleClicked) - misma accion que "Propiedades"
     // del menu contextual.
     void onComponentDoubleClicked(uint32_t componentId);
+    // Doble clic sobre un punto de union en el lienzo (ver
+    // CircuitScene::junctionDoubleClicked) - muestra su posicion, valor
+    // logico y conexiones; un punto de union no tiene Propiedades editables.
+    void onJunctionDoubleClicked(uint32_t junctionId);
     // Abre ui::PreferencesDialog (menu Archivo). Su boton "Restablecer
     // valores predeterminados" re-pinea de inmediato cualquier panel
     // auto-oculto (ver panelsResetRequested en PreferencesDialog.hpp); si el
@@ -193,6 +207,10 @@ private:
     // en el lienzo, o "Propiedades" del menu contextual) - bloquea el resto
     // de la ventana hasta que se cierra, ver PropertiesDialog en setupDocks().
     void openPropertiesDialog(uint32_t componentId);
+    // Texto de una linea para un extremo de cable (pin de componente o punto
+    // de union) -- usado por onJunctionDoubleClicked() para listar las
+    // conexiones de un punto de union.
+    [[nodiscard]] QString describeWireEndpoint(const editor::WireEndpoint& endpoint) const;
     void setupMenusAndToolbars();
     void setupAutosave();
     bool saveToPath(const QString& path);
@@ -253,6 +271,8 @@ private:
     void addKarnaughDocumentTab(uint32_t id);
     // Mirror de addKarnaughDocumentTab() para una tabla de verdad.
     void addTruthTableDocumentTab(uint32_t id);
+    // Mirror de addTruthTableDocumentTab() para una tabla de excitacion.
+    void addExcitationTableDocumentTab(uint32_t id);
     // -1 si `id` no tiene ninguna pestana abierta actualmente.
     [[nodiscard]] int tabIndexForDocument(uint32_t id) const;
     // Habilita/deshabilita el menu Editar y gridAction_/snapAction_
@@ -289,6 +309,7 @@ private:
     QStackedWidget* centralStack_ = nullptr;
     std::map<uint32_t, ui::KarnaughMapView*> karnaughViews_; // Qt-parented (this); ver onKarnaughDocumentAdded/AboutToBeRemoved
     std::map<uint32_t, ui::TruthTableView*> truthTableViews_; // Qt-parented (this); ver onTruthTableDocumentAdded/AboutToBeRemoved
+    std::map<uint32_t, ui::ExcitationTableView*> excitationTableViews_; // Qt-parented (this); ver onExcitationTableDocumentAdded/AboutToBeRemoved
     // Pestanas estilo Visual Studio arriba de view_ (ver
     // setupCentralWidgets()). El id de documento de cada pestana se guarda
     // via QTabBar::setTabData(); no todo documento del proyecto tiene

@@ -4,6 +4,7 @@
 
 #include <vector>
 
+#include "editor/FlipFlopExcitation.hpp"
 #include "editor/KarnaughMap.hpp"
 
 namespace digitalforge::editor {
@@ -84,5 +85,40 @@ struct OutputSpec {
 void synthesizeMultiOutputToCircuit(editor::CircuitDocument& target, int variableCount,
                                      const std::vector<QString>& variableNames,
                                      const std::vector<OutputSpec>& outputs, const SynthesisOptions& options = {});
+
+// Un bit de estado para sintesis SECUENCIAL completa (con flip-flops de
+// verdad, no solo su logica de excitacion) -- ver synthesizeSequentialCircuit().
+struct FlipFlopSpec {
+    QString bitName;
+    // SR no soportado: la biblioteca integrada no tiene ningun flip-flop SR
+    // con reloj (solo memory.srLatch, sin CLK) -- synthesizeSequentialCircuit()
+    // lanza si aparece.
+    editor::FlipFlopType type;
+    // Resultado(s) YA minimizados (editor::minimize()) de la excitacion de
+    // este bit, en el MISMO variableCount/orden de variables que todos los
+    // demas bits del conjunto (los Q de cada uno): 1 elemento para D o T, 2
+    // para JK en orden {J, K} -- mismo orden que devuelve
+    // editor::computeExcitation().
+    std::vector<editor::KarnaughResult> excitationResults;
+};
+
+// Version "circuito completo" de synthesizeMultiOutputToCircuit(): coloca un
+// flip-flop de verdad (memory.dFlipFlop/tFlipFlop/jkFlipFlop, sin
+// preset/clear asincronos) por cada FlipFlopSpec de `flipFlops`, un unico
+// wiring.clock compartido cableado al CLK de todos, y sintetiza (mismo motor
+// AND->OR que synthesizeMultiOutputToCircuit()) la logica combinacional de
+// cada entrada de excitacion cableada DIRECTO al pin correspondiente del
+// flip-flop, en vez de a una wiring.output. Las variables de esa logica son
+// los propios Q/Q' de los flip-flops (realimentacion): a diferencia de la
+// sintesis puramente combinacional, no hay ningun wiring.input ni gates.not
+// para ellas -- Q' ya es una salida real del componente.
+//
+// Vacia `target` primero. Lanza std::invalid_argument si `flipFlops` esta
+// vacio, si algun FlipFlopSpec::type es FlipFlopType::SR, si algun
+// excitationResults.size() no coincide con lo que su tipo espera (1 para
+// D/T, 2 para JK), o si algun KarnaughResult no coincide en variableCount
+// con flipFlops.size() o referencia un variableIndex fuera de rango.
+void synthesizeSequentialCircuit(editor::CircuitDocument& target, const std::vector<FlipFlopSpec>& flipFlops,
+                                  const SynthesisOptions& options = {});
 
 } // namespace digitalforge::formats

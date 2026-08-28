@@ -19,6 +19,7 @@ namespace digitalforge::editor {
 class CircuitDocument;
 class KarnaughDocument;
 class TruthTableDocument;
+class ExcitationTableDocument;
 
 // Agrupa uno o mas CircuitDocument bajo un mismo proyecto (analogo a una
 // "solucion" de Visual Studio con varios documentos/circuitos), cada uno con
@@ -50,7 +51,7 @@ public:
     // CircuitDocument (ver el comentario junto a karnaughDocuments_ mas
     // abajo); esto es la unica pieza de esta clase que necesita saber
     // "de que tipo" es un id sin adivinar por en cual mapa aparece.
-    enum class DocumentKind : uint8_t { Circuit, Karnaugh, TruthTable };
+    enum class DocumentKind : uint8_t { Circuit, Karnaugh, TruthTable, ExcitationTable };
 
     explicit Project(QObject* parent = nullptr);
     ~Project() override;
@@ -117,8 +118,19 @@ public:
     [[nodiscard]] QString truthTableDocumentName(uint32_t id) const;
     [[nodiscard]] std::vector<uint32_t> truthTableDocumentIds() const; // orden de insercion/visualizacion
 
-    // Lanza std::invalid_argument si `id` no aparece en ninguna de las tres
-    // colecciones (documents_, karnaughDocuments_ ni truthTableDocuments_).
+    // Tablas de excitacion de flip-flops: mismo patron que los mapas de
+    // Karnaugh/tablas de verdad de arriba -- ver el comentario de
+    // excitationTableDocuments_ mas abajo.
+    uint32_t addExcitationTableDocument(const QString& name, int stateBitCount = 2);
+    void removeExcitationTableDocument(uint32_t id);
+    void renameExcitationTableDocument(uint32_t id, const QString& newName);
+    [[nodiscard]] ExcitationTableDocument* excitationTableDocument(uint32_t id) const;
+    [[nodiscard]] QString excitationTableDocumentName(uint32_t id) const;
+    [[nodiscard]] std::vector<uint32_t> excitationTableDocumentIds() const; // orden de insercion/visualizacion
+
+    // Lanza std::invalid_argument si `id` no aparece en ninguna de las
+    // cuatro colecciones (documents_, karnaughDocuments_,
+    // truthTableDocuments_ ni excitationTableDocuments_).
     [[nodiscard]] DocumentKind documentKind(uint32_t id) const;
 
     // true si algun documento del proyecto (salvo `excludeId`, usado por
@@ -192,6 +204,10 @@ signals:
     void truthTableDocumentAdded(uint32_t id);
     void truthTableDocumentAboutToBeRemoved(uint32_t id);
     void truthTableDocumentRenamed(uint32_t id);
+    // Mirror de los tres de arriba, para excitationTableDocuments_.
+    void excitationTableDocumentAdded(uint32_t id);
+    void excitationTableDocumentAboutToBeRemoved(uint32_t id);
+    void excitationTableDocumentRenamed(uint32_t id);
     // filePath()/projectName() acaban de cambiar (justo despues de
     // saveToFile() o loadFromFile()) - a diferencia de los cuatro de
     // arriba, esto no tiene que ver con que documento cambio sino con la
@@ -255,6 +271,21 @@ private:
     // clearAllKarnaughDocuments().
     void clearAllTruthTableDocuments();
 
+    // Coleccion TOTALMENTE APARTE de las tres de arriba, mismo criterio
+    // (ver el comentario de KarnaughEntry): una tabla de excitacion no tiene
+    // ComponentRegistry, simulacion ni QUndoStack propio. Comparte nextId_
+    // con las otras tres.
+    struct ExcitationTableEntry {
+        QString name;
+        QString absolutePath; // vacio si la tabla nunca se guardo en disco
+        std::unique_ptr<ExcitationTableDocument> document;
+    };
+    uint32_t addExcitationTableEntry(const QString& name, const QString& absolutePath, int stateBitCount);
+    // Emite excitationTableDocumentAboutToBeRemoved por cada tabla actual y
+    // las borra todas (excitationTableOrder_ queda vacio). Mirror de
+    // clearAllTruthTableDocuments().
+    void clearAllExcitationTableDocuments();
+
     components::ComponentRegistry registry_;
     QUndoGroup undoGroup_;
     std::map<uint32_t, Entry> documents_;
@@ -263,6 +294,8 @@ private:
     std::vector<uint32_t> karnaughOrder_;
     std::map<uint32_t, TruthTableEntry> truthTableDocuments_;
     std::vector<uint32_t> truthTableOrder_;
+    std::map<uint32_t, ExcitationTableEntry> excitationTableDocuments_;
+    std::vector<uint32_t> excitationTableOrder_;
     uint32_t nextId_ = 0;
     uint32_t activeId_ = 0;
     QString projectFilePath_;

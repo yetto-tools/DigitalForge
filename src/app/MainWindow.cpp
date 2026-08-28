@@ -49,12 +49,15 @@
 #include "editor/CircuitScene.hpp"
 #include "editor/CircuitView.hpp"
 #include "editor/ComponentItem.hpp"
+#include "editor/ExcitationTableDocument.hpp"
 #include "editor/KarnaughDocument.hpp"
+#include "editor/LogicColors.hpp"
 #include "editor/Project.hpp"
 #include "editor/TruthTableDocument.hpp"
 #include "formats/ProjectSerializer.hpp"
 #include "ui/AutoHideStrip.hpp"
 #include "ui/ComponentPalette.hpp"
+#include "ui/ExcitationTableView.hpp"
 #include "ui/IconFactory.hpp"
 #include "ui/KarnaughMapView.hpp"
 #include "ui/MiniMapView.hpp"
@@ -239,6 +242,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), project_(std::mak
             &MainWindow::onTruthTableDocumentAboutToBeRemoved);
     connect(project_.get(), &editor::Project::truthTableDocumentRenamed, this,
             &MainWindow::onTruthTableDocumentRenamed);
+    // Mirror de las tres de arriba, para excitationTableViews_.
+    connect(project_.get(), &editor::Project::excitationTableDocumentAdded, this,
+            &MainWindow::onExcitationTableDocumentAdded);
+    connect(project_.get(), &editor::Project::excitationTableDocumentAboutToBeRemoved, this,
+            &MainWindow::onExcitationTableDocumentAboutToBeRemoved);
+    connect(project_.get(), &editor::Project::excitationTableDocumentRenamed, this,
+            &MainWindow::onExcitationTableDocumentRenamed);
     // El documento anonimo inicial se creo dentro del constructor de Project,
     // antes de que las conexiones de arriba existieran - se sincroniza a mano
     // aca para que scenes_ tenga una entrada para el desde el principio.
@@ -351,6 +361,8 @@ void MainWindow::setupDocks() {
             &MainWindow::onKarnaughDocumentActivationRequested);
     connect(projectTree_, &ui::ProjectTree::truthTableDocumentActivationRequested, this,
             &MainWindow::onTruthTableDocumentActivationRequested);
+    connect(projectTree_, &ui::ProjectTree::excitationTableDocumentActivationRequested, this,
+            &MainWindow::onExcitationTableDocumentActivationRequested);
     auto* projectTreeDock = new QDockWidget(tr("Proyecto"), this);
     projectTreeDock->setObjectName("projectTreeDock");
     projectTreeDock->setWidget(projectTree_);
@@ -897,11 +909,13 @@ void MainWindow::setupMenusAndToolbars() {
                              [this] { projectTree_->addNewKarnaughDocument(); });
     karnaughMenu->addAction(tr("Nueva &tabla de verdad..."), this,
                              [this] { projectTree_->addNewTruthTableDocument(); });
+    karnaughMenu->addAction(tr("Nueva tabla de e&xcitacion..."), this,
+                             [this] { projectTree_->addNewExcitationTableDocument(); });
     karnaughMenu->addSeparator();
-    // Solo tiene sentido con una tabla de verdad al frente (un mapa de
-    // Karnaugh YA ES un unico mapa) -- arma un mapa aparte por cada columna
-    // de salida, para inspeccionar/animar el procedimiento de cada una antes
-    // de generar el circuito combinado.
+    // Solo tiene sentido con una tabla de verdad o de excitacion al frente
+    // (un mapa de Karnaugh YA ES un unico mapa) -- arma un mapa aparte por
+    // cada columna de salida (o de excitacion), para inspeccionar/animar el
+    // procedimiento de cada una antes de generar el circuito combinado.
     karnaughMenu->addAction(tr("Generar &mapas"), this, [this] {
         const int index = documentTabBar_ != nullptr ? documentTabBar_->currentIndex() : -1;
         if (index < 0) {
@@ -909,12 +923,20 @@ void MainWindow::setupMenusAndToolbars() {
         }
         const uint32_t id = documentTabBar_->tabData(index).toUInt();
         try {
-            if (project_->documentKind(id) == editor::Project::DocumentKind::TruthTable) {
-                truthTableViews_.at(id)->onGenerateMapsClicked();
-            } else {
-                QMessageBox::information(this, tr("Generar mapas"),
-                                          tr("Esta accion arma un mapa de Karnaugh por columna de salida -- abra o "
-                                             "cree una tabla de verdad primero."));
+            switch (project_->documentKind(id)) {
+                case editor::Project::DocumentKind::TruthTable:
+                    truthTableViews_.at(id)->onGenerateMapsClicked();
+                    break;
+                case editor::Project::DocumentKind::ExcitationTable:
+                    excitationTableViews_.at(id)->onGenerateMapsClicked();
+                    break;
+                case editor::Project::DocumentKind::Karnaugh:
+                case editor::Project::DocumentKind::Circuit:
+                    QMessageBox::information(
+                        this, tr("Generar mapas"),
+                        tr("Esta accion arma un mapa de Karnaugh por columna de salida (o de excitacion) -- abra o "
+                           "cree una tabla de verdad o de excitacion primero."));
+                    break;
             }
         } catch (const std::exception&) {
         }
@@ -943,16 +965,39 @@ void MainWindow::setupMenusAndToolbars() {
                 case editor::Project::DocumentKind::TruthTable:
                     truthTableViews_.at(id)->onGenerateCircuitClicked();
                     return;
+                case editor::Project::DocumentKind::ExcitationTable:
+                    excitationTableViews_.at(id)->onGenerateCircuitClicked();
+                    return;
                 case editor::Project::DocumentKind::Circuit:
                     QMessageBox::information(
                         this, tr("Generar circuito"),
-                        tr("Esta accion sintetiza un circuito a partir de un mapa de Karnaugh o "
-                           "una tabla de verdad -- abra o cree uno primero."));
+                        tr("Esta accion sintetiza un circuito a partir de un mapa de Karnaugh, una tabla de verdad "
+                           "o una tabla de excitacion -- abra o cree uno primero."));
                     return;
             }
         } catch (const std::exception&) {
             // Pestana en un estado transitorio (p. ej. a mitad de cerrarse) --
             // sin efecto, en vez de crashear la aplicacion entera.
+        }
+    });
+    // Solo tiene efecto con una tabla de excitacion al frente: coloca
+    // flip-flops de verdad, no solo su logica -- ver
+    // ui::ExcitationTableView::onGenerateCircuitWithFlipFlopsClicked().
+    karnaughMenu->addAction(tr("Generar circuito con &flip-flops"), this, [this] {
+        const int index = documentTabBar_ != nullptr ? documentTabBar_->currentIndex() : -1;
+        if (index < 0) {
+            return;
+        }
+        const uint32_t id = documentTabBar_->tabData(index).toUInt();
+        try {
+            if (project_->documentKind(id) == editor::Project::DocumentKind::ExcitationTable) {
+                excitationTableViews_.at(id)->onGenerateCircuitWithFlipFlopsClicked();
+            } else {
+                QMessageBox::information(this, tr("Generar circuito con flip-flops"),
+                                          tr("Esta accion coloca un flip-flop de verdad por bit -- abra o cree una "
+                                             "tabla de excitacion primero."));
+            }
+        } catch (const std::exception&) {
         }
     });
 
@@ -1107,6 +1152,44 @@ void MainWindow::onComponentDoubleClicked(uint32_t componentId) { openProperties
 void MainWindow::openPropertiesDialog(uint32_t componentId) {
     inspector_->setSelectedComponents({componentId});
     propertiesDialog_->exec();
+}
+
+QString MainWindow::describeWireEndpoint(const editor::WireEndpoint& endpoint) const {
+    if (endpoint.isJunction) {
+        return tr("Punto de union #%1").arg(endpoint.id);
+    }
+    const components::ComponentInstance* instance = project_->activeDocument()->component(endpoint.id);
+    if (instance == nullptr) {
+        return tr("(componente eliminado)");
+    }
+    const std::string& label = std::get<std::string>(instance->property("label"));
+    const QString name =
+        label.empty() ? QString::fromStdString(instance->typeId()) : QString::fromStdString(label);
+    QString pinName;
+    if (endpoint.pinIndex < instance->pins().size()) {
+        pinName = QString::fromStdString(instance->pins()[endpoint.pinIndex].name).trimmed();
+    }
+    return pinName.isEmpty() ? name : tr("%1 (pin %2)").arg(name, pinName);
+}
+
+void MainWindow::onJunctionDoubleClicked(uint32_t junctionId) {
+    editor::CircuitDocument* document = project_->activeDocument();
+    const QPointF pos = document->junctionPosition(junctionId);
+    const core::LogicValue value = document->endpointValue(editor::WireEndpoint::junction(junctionId));
+    const std::vector<editor::WireConnection> wires = document->wiresAttachedToJunction(junctionId);
+
+    QStringList lines;
+    lines << tr("Posicion: (%1, %2)").arg(pos.x()).arg(pos.y());
+    lines << tr("Valor logico: %1").arg(editor::logicValueGlyph(value));
+    lines << QString();
+    lines << tr("Conexiones (%1):").arg(wires.size());
+    for (const editor::WireConnection& wire : wires) {
+        const editor::WireEndpoint other =
+            (wire.a.isJunction && wire.a.id == junctionId) ? wire.b : wire.a;
+        lines << QStringLiteral("  • ") + describeWireEndpoint(other);
+    }
+
+    QMessageBox::information(this, tr("Punto de union"), lines.join(QStringLiteral("\n")));
 }
 
 void MainWindow::onNewProject() {
@@ -1546,6 +1629,7 @@ void MainWindow::onDocumentAdded(uint32_t id) {
     connect(scene, &CircuitScene::selectionChanged, this, &MainWindow::onSceneSelectionChanged);
     connect(scene, &CircuitScene::componentContextMenuRequested, this, &MainWindow::onComponentContextMenuRequested);
     connect(scene, &CircuitScene::componentDoubleClicked, this, &MainWindow::onComponentDoubleClicked);
+    connect(scene, &CircuitScene::junctionDoubleClicked, this, &MainWindow::onJunctionDoubleClicked);
     // Valor por defecto configurado en Preferencias - no afecta documentos ya
     // abiertos, solo el que se acaba de crear (ver PreferencesDialog.hpp).
     scene->setGridVisible(settings_.defaultGridVisible);
@@ -1726,6 +1810,50 @@ void MainWindow::onTruthTableDocumentRenamed(uint32_t id) {
 
 void MainWindow::onTruthTableDocumentActivationRequested(uint32_t id) { addTruthTableDocumentTab(id); }
 
+void MainWindow::onExcitationTableDocumentAdded(uint32_t id) {
+    auto* view = new ui::ExcitationTableView(project_.get(), id, project_->excitationTableDocument(id), this);
+    excitationTableViews_[id] = view;
+    if (centralStack_ != nullptr) {
+        centralStack_->addWidget(view);
+    }
+    if (documentTabBar_ != nullptr) {
+        addExcitationTableDocumentTab(id);
+    }
+}
+
+void MainWindow::onExcitationTableDocumentAboutToBeRemoved(uint32_t id) {
+    if (documentTabBar_ != nullptr) {
+        const int tabIndex = tabIndexForDocument(id);
+        if (tabIndex >= 0) {
+            documentTabBar_->removeTab(tabIndex);
+        }
+    }
+    const auto it = excitationTableViews_.find(id);
+    if (it == excitationTableViews_.end()) {
+        return;
+    }
+    if (centralStack_ != nullptr && centralStack_->currentWidget() == it->second) {
+        centralStack_->setCurrentWidget(view_);
+    }
+    if (centralStack_ != nullptr) {
+        centralStack_->removeWidget(it->second);
+    }
+    delete it->second;
+    excitationTableViews_.erase(it);
+}
+
+void MainWindow::onExcitationTableDocumentRenamed(uint32_t id) {
+    if (documentTabBar_ == nullptr) {
+        return;
+    }
+    const int tabIndex = tabIndexForDocument(id);
+    if (tabIndex >= 0) {
+        documentTabBar_->setTabText(tabIndex, project_->excitationTableDocumentName(id));
+    }
+}
+
+void MainWindow::onExcitationTableDocumentActivationRequested(uint32_t id) { addExcitationTableDocumentTab(id); }
+
 void MainWindow::onDocumentTabChanged(int index) {
     if (index < 0) {
         return; // se cerro la ultima pestana visible - ver onDocumentTabCloseRequested()
@@ -1750,6 +1878,12 @@ void MainWindow::onDocumentTabChanged(int index) {
             case editor::Project::DocumentKind::TruthTable:
                 if (centralStack_ != nullptr) {
                     centralStack_->setCurrentWidget(truthTableViews_.at(id));
+                }
+                setCircuitEditingEnabled(false);
+                return;
+            case editor::Project::DocumentKind::ExcitationTable:
+                if (centralStack_ != nullptr) {
+                    centralStack_->setCurrentWidget(excitationTableViews_.at(id));
                 }
                 setCircuitEditingEnabled(false);
                 return;
@@ -1803,6 +1937,17 @@ void MainWindow::addTruthTableDocumentTab(uint32_t id) {
         return;
     }
     const int index = documentTabBar_->addTab(project_->truthTableDocumentName(id));
+    documentTabBar_->setTabData(index, id);
+    documentTabBar_->setCurrentIndex(index);
+}
+
+void MainWindow::addExcitationTableDocumentTab(uint32_t id) {
+    const int existing = tabIndexForDocument(id);
+    if (existing >= 0) {
+        documentTabBar_->setCurrentIndex(existing);
+        return;
+    }
+    const int index = documentTabBar_->addTab(project_->excitationTableDocumentName(id));
     documentTabBar_->setTabData(index, id);
     documentTabBar_->setCurrentIndex(index);
 }

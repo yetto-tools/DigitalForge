@@ -467,8 +467,18 @@ void CircuitScene::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event) {
     // Doble clic sobre el cuerpo de un componente abre el dialogo de
     // Propiedades - antes de dejar que el item lo procese, para que no
     // dependa de que ComponentItem implemente su propio
-    // mouseDoubleClickEvent (no lo hace).
+    // mouseDoubleClickEvent (no lo hace). Un punto de union no tiene
+    // Propiedades (no es un ComponentInstance), pero doble clic ahi igual
+    // muestra su informacion de conexiones -- se busca ANTES que
+    // ComponentItem porque un JunctionItem (zValue -0.5) siempre queda por
+    // encima de cualquier cuerpo de componente que pudiera superponerse en
+    // el mismo punto.
     for (QGraphicsItem* hit : items(event->scenePos())) {
+        if (auto* junction = dynamic_cast<JunctionItem*>(hit)) {
+            emit junctionDoubleClicked(junction->junctionId());
+            event->accept();
+            return;
+        }
         if (auto* component = dynamic_cast<ComponentItem*>(hit)) {
             emit componentDoubleClicked(component->componentId());
             event->accept();

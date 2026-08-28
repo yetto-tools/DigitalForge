@@ -12,6 +12,8 @@
 #include <QUndoStack>
 
 #include "editor/CircuitDocument.hpp"
+#include "editor/ExcitationTableDocument.hpp"
+#include "editor/FlipFlopExcitation.hpp"
 #include "editor/KarnaughDocument.hpp"
 #include "editor/Project.hpp"
 #include "editor/UndoCommands.hpp"
@@ -405,4 +407,105 @@ TEST_CASE("loadFromFile still loads a manifest with no \"kind\" key exactly as b
 
     std::remove(kProjectPath);
     std::remove(kDocPath);
+}
+
+TEST_CASE("addExcitationTableDocument adds a document distinguishable via documentKind()",
+          "[project][excitationTable]") {
+    Project project;
+    const uint32_t circuitId = project.documentIds().front();
+    const uint32_t excitationId = project.addExcitationTableDocument("MiExcitacion", 3);
+
+    CHECK(excitationId != circuitId); // mismo espacio de ids, nunca chocan
+    CHECK(project.documentKind(circuitId) == Project::DocumentKind::Circuit);
+    CHECK(project.documentKind(excitationId) == Project::DocumentKind::ExcitationTable);
+    CHECK(project.excitationTableDocumentIds() == std::vector<uint32_t>{excitationId});
+    CHECK(project.excitationTableDocumentName(excitationId) == QString("MiExcitacion"));
+    CHECK(project.excitationTableDocument(excitationId)->stateBitCount() == 3);
+    CHECK(project.hasUnsavedChanges());
+
+    // No participa de activeDocumentId()/activeDocument(): mismo criterio
+    // que un mapa de Karnaugh (ver el comentario de
+    // Project::addKarnaughDocument()).
+    CHECK(project.activeDocumentId() == circuitId);
+
+    CHECK_THROWS_AS(project.documentKind(999), std::invalid_argument);
+}
+
+TEST_CASE("addExcitationTableDocument shares the same name namespace as circuit/Karnaugh/TruthTable documents",
+          "[project][excitationTable][uniqueness]") {
+    Project project;
+    project.renameDocument(project.documentIds().front(), "Compartido");
+    CHECK_THROWS_AS(project.addExcitationTableDocument("Compartido"), std::invalid_argument);
+    CHECK_THROWS_AS(project.addExcitationTableDocument("COMPARTIDO"), std::invalid_argument);
+
+    const uint32_t excitationId = project.addExcitationTableDocument("SoloExcitacion");
+    CHECK_THROWS_AS(project.addDocument("SoloExcitacion"), std::invalid_argument);
+    CHECK_THROWS_AS(project.renameDocument(project.documentIds().front(), "SoloExcitacion"), std::invalid_argument);
+    CHECK_THROWS_AS(project.renameExcitationTableDocument(excitationId, "Compartido"), std::invalid_argument);
+}
+
+TEST_CASE("removeExcitationTableDocument removes it without requiring at least one to remain",
+          "[project][excitationTable]") {
+    Project project;
+    const uint32_t id = project.addExcitationTableDocument("Temporal");
+    REQUIRE(project.excitationTableDocumentIds().size() == 1);
+
+    project.removeExcitationTableDocument(id);
+    CHECK(project.excitationTableDocumentIds().empty()); // a diferencia de removeDocument(), cero es valido
+    CHECK_THROWS_AS(project.removeExcitationTableDocument(id), std::invalid_argument);
+}
+
+TEST_CASE("renameExcitationTableDocument updates the display name and emits excitationTableDocumentRenamed",
+          "[project][excitationTable]") {
+    Project project;
+    const uint32_t id = project.addExcitationTableDocument("Original");
+    int renamedCount = 0;
+    QObject::connect(&project, &Project::excitationTableDocumentRenamed, [&](uint32_t renamedId) {
+        ++renamedCount;
+        CHECK(renamedId == id);
+    });
+    project.renameExcitationTableDocument(id, "Renombrado");
+    CHECK(project.excitationTableDocumentName(id) == QString("Renombrado"));
+    CHECK(renamedCount == 1);
+}
+
+TEST_CASE("A project mixing a circuit and an excitation table round-trips through saveToFile/loadFromFile",
+          "[project][excitationTable][roundtrip]") {
+    constexpr const char* kProjectPath = "test_project_excitation_roundtrip.dfproj";
+    {
+        Project project;
+        project.renameDocument(project.documentIds().front(), "Circuito");
+        wireAndGateWithLed(*project.activeDocument());
+
+        const uint32_t excitationId = project.addExcitationTableDocument("Excitacion", 3);
+        auto* excitationDoc = project.excitationTableDocument(excitationId);
+        excitationDoc->setStateBitName(0, "X");
+        excitationDoc->setFlipFlopType(1, digitalforge::editor::FlipFlopType::JK);
+        excitationDoc->setNextState(0, 5, digitalforge::editor::KarnaughCellValue::One);
+
+        project.saveToFile(kProjectPath);
+        CHECK_FALSE(project.hasUnsavedChanges());
+    }
+
+    Project loaded;
+    loaded.loadFromFile(kProjectPath);
+
+    // El circuito sigue siendo el documento activo tras recargar (mismo
+    // criterio que un mapa de Karnaugh: las tablas de excitacion van al
+    // final del arreglo del manifiesto).
+    CHECK(loaded.documentIds().size() == 1);
+    CHECK(loaded.document(loaded.activeDocumentId())->componentIds().size() == 4);
+
+    REQUIRE(loaded.excitationTableDocumentIds().size() == 1);
+    const uint32_t excitationId = loaded.excitationTableDocumentIds().front();
+    CHECK(loaded.excitationTableDocumentName(excitationId) == QString("Excitacion"));
+    auto* excitationDoc = loaded.excitationTableDocument(excitationId);
+    CHECK(excitationDoc->stateBitCount() == 3);
+    CHECK(excitationDoc->stateBitName(0) == QString("X"));
+    CHECK(excitationDoc->flipFlopType(1) == digitalforge::editor::FlipFlopType::JK);
+    CHECK(excitationDoc->nextState(0, 5) == digitalforge::editor::KarnaughCellValue::One);
+
+    std::remove(kProjectPath);
+    std::remove("Circuito.dfc");
+    std::remove("Excitacion.dfe");
 }

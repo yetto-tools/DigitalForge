@@ -23,6 +23,7 @@
 
 #include "core/LogicValue.hpp"
 #include "editor/CircuitDocument.hpp"
+#include "editor/FlipFlopExcitation.hpp"
 #include "editor/KarnaughMap.hpp"
 #include "editor/TruthTable.hpp"
 #include "editor/UndoCommands.hpp"
@@ -33,15 +34,19 @@ using digitalforge::editor::CircuitDocument;
 using digitalforge::editor::computeTruthTable;
 using digitalforge::editor::DeleteComponentCommand;
 using digitalforge::editor::DeleteWireCommand;
+using digitalforge::editor::FlipFlopType;
 using digitalforge::editor::KarnaughCellValue;
 using digitalforge::editor::MergeJunctionCommand;
 using digitalforge::editor::minimize;
+using digitalforge::editor::PinRef;
 using digitalforge::editor::TruthTable;
 using digitalforge::editor::WireConnection;
 using digitalforge::editor::WireEndpoint;
+using digitalforge::formats::FlipFlopSpec;
 using digitalforge::formats::OutputSpec;
 using digitalforge::formats::SynthesisOptions;
 using digitalforge::formats::synthesizeMultiOutputToCircuit;
+using digitalforge::formats::synthesizeSequentialCircuit;
 using digitalforge::formats::synthesizeToCircuit;
 
 namespace {
@@ -51,6 +56,21 @@ using CV = KarnaughCellValue;
 std::vector<QString> namesFor(int variableCount) {
     static const std::vector<QString> all = {"A", "B", "C", "D"};
     return std::vector<QString>(all.begin(), all.begin() + variableCount);
+}
+
+// Ubica el componente con esta etiqueta -- synthesizeSequentialCircuit()
+// pone FlipFlopSpec::bitName como "label" de cada flip-flop, asi que sirve
+// para encontrar el id de un bit concreto sin asumir nada sobre el orden de
+// componentIds().
+uint32_t findComponentByLabel(const CircuitDocument& document, const QString& label) {
+    for (uint32_t id : document.componentIds()) {
+        const auto* instance = document.component(id);
+        if (std::get<std::string>(instance->property("label")) == label.toStdString()) {
+            return id;
+        }
+    }
+    FAIL("no component with label '" << label.toStdString() << "'");
+    return 0;
 }
 
 // Reproduce exactamente CircuitScene::deleteSelected() (ver CircuitScene.cpp)
@@ -393,5 +413,124 @@ TEST_CASE("deleteSelected() on a synthesized circuit never crashes, for every po
         INFO("mask = " << mask);
         REQUIRE_NOTHROW(
             deleteSelectedIds(doc, undoStack, selectedComponentIds, selectedWireIds, selectedJunctionIds));
+    }
+}
+
+TEST_CASE("synthesizeSequentialCircuit rejects an empty flip-flop list", "[karnaugh][synthesis][sequential]") {
+    CircuitDocument doc;
+    CHECK_THROWS_AS(synthesizeSequentialCircuit(doc, {}), std::invalid_argument);
+}
+
+TEST_CASE("synthesizeSequentialCircuit rejects FlipFlopType::SR (no clocked component in the library)",
+          "[karnaugh][synthesis][sequential]") {
+    const auto result = minimize(2, namesFor(2), {CV::Zero, CV::One, CV::Zero, CV::One});
+    CircuitDocument doc;
+    CHECK_THROWS_AS(synthesizeSequentialCircuit(doc, {FlipFlopSpec{"Q0", FlipFlopType::SR, {result, result}}}),
+                     std::invalid_argument);
+}
+
+TEST_CASE("synthesizeSequentialCircuit rejects an excitationResults size that doesn't match the flip-flop type",
+          "[karnaugh][synthesis][sequential]") {
+    const auto result = minimize(2, namesFor(2), {CV::Zero, CV::One, CV::Zero, CV::One});
+    CircuitDocument doc;
+    // D/T esperan 1 resultado, no 2.
+    CHECK_THROWS_AS(synthesizeSequentialCircuit(doc, {FlipFlopSpec{"Q0", FlipFlopType::D, {result, result}}}),
+                     std::invalid_argument);
+    // JK espera 2 resultados (J,K), no 1.
+    CHECK_THROWS_AS(synthesizeSequentialCircuit(doc, {FlipFlopSpec{"Q0", FlipFlopType::JK, {result}}}),
+                     std::invalid_argument);
+}
+
+TEST_CASE("synthesizeSequentialCircuit places one flip-flop per bit, a single shared clock wired to every CLK, "
+          "and no wiring.input/wiring.output for the state variables",
+          "[karnaugh][synthesis][sequential]") {
+    // Contador binario sincronico de 2 bits con flip-flops T: T0 = 1
+    // (togglea siempre), T1 = Q0 (togglea solo cuando Q0 vale 1) -- A = Q0
+    // (bit 0), B = Q1 (bit 1), mismo orden que namesFor(2).
+    const auto t0 = minimize(2, namesFor(2), {CV::One, CV::One, CV::One, CV::One});
+    const auto t1 = minimize(2, namesFor(2), {CV::Zero, CV::One, CV::Zero, CV::One});
+    const std::vector<FlipFlopSpec> specs = {
+        FlipFlopSpec{"Q0", FlipFlopType::T, {t0}},
+        FlipFlopSpec{"Q1", FlipFlopType::T, {t1}},
+    };
+
+    CircuitDocument doc;
+    synthesizeSequentialCircuit(doc, specs);
+
+    int flipFlopCount = 0;
+    int clockCount = 0;
+    uint32_t clockId = 0;
+    for (uint32_t id : doc.componentIds()) {
+        const std::string& typeId = doc.component(id)->typeId();
+        CHECK(typeId != "wiring.input");
+        CHECK(typeId != "wiring.output");
+        if (typeId == "memory.tFlipFlop") {
+            ++flipFlopCount;
+        } else if (typeId == "wiring.clock") {
+            ++clockCount;
+            clockId = id;
+        }
+    }
+    CHECK(flipFlopCount == 2);
+    REQUIRE(clockCount == 1);
+
+    // El reloj tiene que alcanzar el CLK (pin 1 de memory.tFlipFlop, ver
+    // makeTFlipFlopDefinition()) de los dos flip-flops -- ningun punto de
+    // union hace falta: un pin admite varios cables directos.
+    CHECK(doc.wiresAttachedToPin(PinRef{clockId, 0}).size() == 2);
+
+    // Q0 realimenta hacia la logica de excitacion de Q1 (T1 = Q0): su pin Q
+    // (indice 2) tiene que estar cableado a algo mas alla del propio
+    // flip-flop.
+    const uint32_t q0Id = findComponentByLabel(doc, "Q0");
+    CHECK_FALSE(doc.wiresAttachedToPin(PinRef{q0Id, 2}).empty());
+}
+
+TEST_CASE("synthesizeSequentialCircuit wires a JK flip-flop's J and K from its two excitation results",
+          "[karnaugh][synthesis][sequential]") {
+    // Dos bits de estado (minimize() exige 2-4 variables, igual que
+    // ExcitationTableDocument): Q0 es JK con J = A (=Q0), K = B (=Q1); Q1 es
+    // D con D = A, solo para que haya un segundo bit valido -- este test
+    // solo le importa la topologia del primero.
+    const auto j = minimize(2, namesFor(2), {CV::Zero, CV::One, CV::Zero, CV::One}); // J = A
+    const auto k = minimize(2, namesFor(2), {CV::Zero, CV::Zero, CV::One, CV::One}); // K = B
+    const auto d = minimize(2, namesFor(2), {CV::Zero, CV::One, CV::Zero, CV::One}); // D = A
+    const std::vector<FlipFlopSpec> specs = {
+        FlipFlopSpec{"Q0", FlipFlopType::JK, {j, k}},
+        FlipFlopSpec{"Q1", FlipFlopType::D, {d}},
+    };
+
+    CircuitDocument doc;
+    synthesizeSequentialCircuit(doc, specs);
+
+    int jkCount = 0;
+    for (uint32_t id : doc.componentIds()) {
+        if (doc.component(id)->typeId() == "memory.jkFlipFlop") {
+            ++jkCount;
+        }
+    }
+    CHECK(jkCount == 1);
+
+    // J = A (un solo literal, sin compuerta AND: se cablea directo) y K = B
+    // idem -- ambos pines de entrada (J=0, K=1, ver makeJkFlipFlopDefinition())
+    // tienen que llegar cableados.
+    const uint32_t ffId = findComponentByLabel(doc, "Q0");
+    CHECK_FALSE(doc.wiresAttachedToPin(PinRef{ffId, 0}).empty()); // J
+    CHECK_FALSE(doc.wiresAttachedToPin(PinRef{ffId, 1}).empty()); // K
+}
+
+TEST_CASE("synthesizeSequentialCircuit clears any pre-existing content in the target document",
+          "[karnaugh][synthesis][sequential]") {
+    CircuitDocument doc;
+    doc.addComponent("io.led");
+    REQUIRE(doc.componentIds().size() == 1);
+
+    const auto d0 = minimize(2, namesFor(2), {CV::Zero, CV::Zero, CV::Zero, CV::One});
+    const auto d1 = minimize(2, namesFor(2), {CV::Zero, CV::One, CV::Zero, CV::One});
+    synthesizeSequentialCircuit(
+        doc, {FlipFlopSpec{"Q0", FlipFlopType::D, {d0}}, FlipFlopSpec{"Q1", FlipFlopType::D, {d1}}});
+
+    for (uint32_t id : doc.componentIds()) {
+        CHECK(doc.component(id)->typeId() != "io.led");
     }
 }
