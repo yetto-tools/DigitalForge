@@ -4,6 +4,8 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDockWidget>
 #include <QEvent>
@@ -388,26 +390,34 @@ void MainWindow::setupDocks() {
     // que lo vaya a sincronizar solo; se hace una vez aca, a mano.
     miniMap_->setTarget(activeScene(), view_);
 
+    // inspector_ ya no vive en un dock anclado: se abre a demanda dentro de
+    // propertiesDialog_ (dialogo modal, ver openPropertiesDialog()), disparado
+    // por doble clic sobre un componente o por "Propiedades" del menu
+    // contextual - nunca se agrega a esta ventana con addDockWidget().
     inspector_ = new ui::PropertyInspector(project_->activeDocument(), project_->activeUndoStack(), this);
-    inspectorDock_ = new QDockWidget(tr("Propiedades"), this);
-    inspectorDock_->setObjectName("inspectorDock");
-    inspectorDock_->setWidget(inspector_);
-    inspectorDock_->setTitleBarWidget(new DockTitleBar(inspectorDock_));
-    addDockWidget(Qt::RightDockWidgetArea, inspectorDock_);
+    propertiesDialog_ = new QDialog(this);
+    propertiesDialog_->setObjectName("propertiesDialog");
+    propertiesDialog_->setWindowTitle(tr("Propiedades"));
+    propertiesDialog_->setModal(true);
+    auto* propertiesLayout = new QVBoxLayout(propertiesDialog_);
+    propertiesLayout->addWidget(inspector_);
+    auto* propertiesButtons = new QDialogButtonBox(QDialogButtonBox::Close, propertiesDialog_);
+    connect(propertiesButtons, &QDialogButtonBox::rejected, propertiesDialog_, &QDialog::close);
+    propertiesLayout->addWidget(propertiesButtons);
 
     truthTablePanel_ = new ui::TruthTablePanel(project_.get(), project_->activeDocument(), this);
     truthTableDock_ = new QDockWidget(tr("Tabla de verdad"), this);
     truthTableDock_->setObjectName("truthTableDock");
     truthTableDock_->setWidget(truthTablePanel_);
     truthTableDock_->setTitleBarWidget(new DockTitleBar(truthTableDock_));
-    tabifyDockWidget(inspectorDock_, truthTableDock_);
+    addDockWidget(Qt::RightDockWidgetArea, truthTableDock_);
 
     waveformPanel_ = new ui::WaveformPanel(project_->activeDocument(), this);
     waveformDock_ = new QDockWidget(tr("Analizador de senales"), this);
     waveformDock_->setObjectName("waveformDock");
     waveformDock_->setWidget(waveformPanel_);
     waveformDock_->setTitleBarWidget(new DockTitleBar(waveformDock_));
-    tabifyDockWidget(inspectorDock_, waveformDock_);
+    tabifyDockWidget(truthTableDock_, waveformDock_);
     // Visibles de entrada, igual que projectTreeDock/paletteDock del lado
     // izquierdo - el unico control de visibilidad es el pin de auto-hide de
     // cada uno (ver DockTitleBar/makeAutoHideable), sin ningun boton grupal
@@ -420,9 +430,8 @@ void MainWindow::setupDocks() {
 
     makeAutoHideable(projectTreeDock, Qt::LeftDockWidgetArea, paletteDock);
     makeAutoHideable(paletteDock, Qt::LeftDockWidgetArea, projectTreeDock);
-    makeAutoHideable(inspectorDock_, Qt::RightDockWidgetArea, truthTableDock_);
-    makeAutoHideable(truthTableDock_, Qt::RightDockWidgetArea, inspectorDock_);
-    makeAutoHideable(waveformDock_, Qt::RightDockWidgetArea, inspectorDock_);
+    makeAutoHideable(truthTableDock_, Qt::RightDockWidgetArea, waveformDock_);
+    makeAutoHideable(waveformDock_, Qt::RightDockWidgetArea, truthTableDock_);
 
     // El auto-hide guardado ya no se aplica aca sino en restoreWindowLayout(),
     // que corre una vez creadas tambien las barras de herramientas: hay que
@@ -862,7 +871,7 @@ void MainWindow::setupMenusAndToolbars() {
     editMenu->addAction(icons::deleteItem(), tr("&Eliminar"), this, [this] { activeScene()->deleteSelected(); })
         ->setShortcut(QKeySequence::Delete);
     editMenu->addAction(icons::rotate(), tr("&Rotar"), this, [this] { activeScene()->rotateSelected(); })
-        ->setShortcut(QStringLiteral("R"));
+        ->setShortcuts({QKeySequence(QStringLiteral("R")), QKeySequence(Qt::CTRL | Qt::Key_R)});
     editMenu->addSeparator();
     editMenu->addAction(tr("Cop&iar"), this, [this] { activeScene()->copySelected(); })->setShortcut(QKeySequence::Copy);
     editMenu->addAction(tr("Cor&tar"), this, [this] { activeScene()->cutSelected(); })->setShortcut(QKeySequence::Cut);
@@ -878,7 +887,7 @@ void MainWindow::setupMenusAndToolbars() {
     simMenu->addAction(icons::step(), tr("Paso a &paso"), this, [this] { project_->activeDocument()->step(); })
         ->setShortcut(QKeySequence(Qt::Key_F6));
     simMenu->addAction(icons::reset(), tr("Re&iniciar"), this, [this] { project_->activeDocument()->rebuildSimulation(); })
-        ->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_R));
+        ->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
 
     // --- Karnaugh --- (mapas de Karnaugh y tablas de verdad multi-salida:
     // las dos formas de sintetizar un circuito a partir de una funcion
@@ -1063,10 +1072,7 @@ void MainWindow::onComponentContextMenuRequested(uint32_t componentId, QPoint sc
     // "desplegar menu al dar clic derecho... opciones de rotacion").
     QMenu menu(this);
     QAction* propertiesAction = menu.addAction(tr("Propiedades"));
-    connect(propertiesAction, &QAction::triggered, this, [this, componentId] {
-        inspector_->setSelectedComponents({componentId});
-        revealDock(inspectorDock_);
-    });
+    connect(propertiesAction, &QAction::triggered, this, [this, componentId] { openPropertiesDialog(componentId); });
     menu.addSeparator();
     // Sin setShortcut() aca a proposito: ya existen los mismos atajos
     // globales (R/Supr, ver el menu Editar arriba y
@@ -1094,6 +1100,13 @@ void MainWindow::onComponentContextMenuRequested(uint32_t componentId, QPoint sc
     connect(sendToBackAction, &QAction::triggered, this, [this] { activeScene()->sendSelectedToBack(); });
 
     menu.exec(screenPos);
+}
+
+void MainWindow::onComponentDoubleClicked(uint32_t componentId) { openPropertiesDialog(componentId); }
+
+void MainWindow::openPropertiesDialog(uint32_t componentId) {
+    inspector_->setSelectedComponents({componentId});
+    propertiesDialog_->exec();
 }
 
 void MainWindow::onNewProject() {
@@ -1532,6 +1545,7 @@ void MainWindow::onDocumentAdded(uint32_t id) {
     auto* scene = new CircuitScene(project_->document(id), project_->undoStack(id), this);
     connect(scene, &CircuitScene::selectionChanged, this, &MainWindow::onSceneSelectionChanged);
     connect(scene, &CircuitScene::componentContextMenuRequested, this, &MainWindow::onComponentContextMenuRequested);
+    connect(scene, &CircuitScene::componentDoubleClicked, this, &MainWindow::onComponentDoubleClicked);
     // Valor por defecto configurado en Preferencias - no afecta documentos ya
     // abiertos, solo el que se acaba de crear (ver PreferencesDialog.hpp).
     scene->setGridVisible(settings_.defaultGridVisible);

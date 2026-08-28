@@ -134,6 +134,8 @@ QPointF WireItem::nearestPointOnPath(QPointF scenePos) const {
         return scenePos;
     }
     QPointF best = polyline.front();
+    QPointF bestSegA = polyline.front();
+    QPointF bestSegB = polyline.front();
     qreal bestDistance = std::numeric_limits<qreal>::max();
     for (std::size_t i = 0; i + 1 < polyline.size(); ++i) {
         QPointF projection;
@@ -141,6 +143,25 @@ QPointF WireItem::nearestPointOnPath(QPointF scenePos) const {
         if (distance < bestDistance) {
             bestDistance = distance;
             best = projection;
+            bestSegA = polyline[i];
+            bestSegB = polyline[i + 1];
+        }
+    }
+    // Ajusta el punto de derivacion a la misma media-grilla que los quiebres
+    // arrastrados (ver kWireGridSize), pero solo en la coordenada LIBRE del
+    // segmento -- la fija queda tal cual trae el cable (puede no caer justo
+    // en la grilla si viene de un pin), para no despegar el punto del
+    // trazado real. Sin esto, el punto de union quedaba a menos de un pixel
+    // del cable pero fuera de grilla (el defecto reportado: "las uniones de
+    // cables no estan ancladas al grid"), y el proximo tramo que salia de
+    // ahi heredaba ese desvio como una esquina espuria (cables cruzados o
+    // deformados al conectar sobre una interseccion).
+    if (auto* circuitScene = qobject_cast<CircuitScene*>(scene());
+        circuitScene != nullptr && circuitScene->snapToGridEnabled()) {
+        if (std::abs(bestSegA.y() - bestSegB.y()) <= kWireAlignTolerance) {
+            best.setX(std::round(best.x() / kWireGridSize) * kWireGridSize);
+        } else if (std::abs(bestSegA.x() - bestSegB.x()) <= kWireAlignTolerance) {
+            best.setY(std::round(best.y() / kWireGridSize) * kWireGridSize);
         }
     }
     return best;

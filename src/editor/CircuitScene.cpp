@@ -464,6 +464,17 @@ void CircuitScene::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event) {
         event->accept();
         return;
     }
+    // Doble clic sobre el cuerpo de un componente abre el dialogo de
+    // Propiedades - antes de dejar que el item lo procese, para que no
+    // dependa de que ComponentItem implemente su propio
+    // mouseDoubleClickEvent (no lo hace).
+    for (QGraphicsItem* hit : items(event->scenePos())) {
+        if (auto* component = dynamic_cast<ComponentItem*>(hit)) {
+            emit componentDoubleClicked(component->componentId());
+            event->accept();
+            return;
+        }
+    }
     QGraphicsScene::mouseDoubleClickEvent(event);
 }
 

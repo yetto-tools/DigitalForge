@@ -14,8 +14,7 @@ QByteArray windowState() { return QByteArray::fromBase64(QByteArray(kWindowState
 QStringList autoHiddenDocks() {
     // Paneles del lado derecho colapsados de entrada: el lienzo arranca con
     // todo el ancho util y cada panel se despliega al pulsar su pestana.
-    return {QStringLiteral("inspectorDock"), QStringLiteral("truthTableDock"),
-            QStringLiteral("waveformDock")};
+    return {QStringLiteral("truthTableDock"), QStringLiteral("waveformDock")};
 }
 
 } // namespace digitalforge::app::defaults

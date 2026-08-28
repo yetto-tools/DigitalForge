@@ -116,6 +116,11 @@ signals:
     // ya no actualiza el inspector automaticamente (ver
     // MainWindow::onSceneSelectionChanged).
     void componentContextMenuRequested(uint32_t componentId, QPoint screenPos);
+    // Emitida al hacer doble clic sobre un ComponentItem en modo Seleccion
+    // (incluida la simulacion en vivo, salvo que el doble clic ya haya sido
+    // consumido por tryToggleInput()). MainWindow la usa para abrir el
+    // dialogo modal de Propiedades.
+    void componentDoubleClicked(uint32_t componentId);
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override;

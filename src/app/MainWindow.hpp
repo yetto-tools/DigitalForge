@@ -19,6 +19,7 @@ class QCloseEvent;
 class QResizeEvent;
 class QEvent;
 class QAction;
+class QDialog;
 class QDockWidget;
 class QMenu;
 class QTabBar;
@@ -128,6 +129,10 @@ private slots:
     // que onSceneSelectionChanged() deja de actualizar el inspector
     // automaticamente en ese estado (ver el comentario ahi).
     void onComponentContextMenuRequested(uint32_t componentId, QPoint screenPos);
+    // Doble clic sobre un componente en el lienzo (ver
+    // CircuitScene::componentDoubleClicked) - misma accion que "Propiedades"
+    // del menu contextual.
+    void onComponentDoubleClicked(uint32_t componentId);
     // Abre ui::PreferencesDialog (menu Archivo). Su boton "Restablecer
     // valores predeterminados" re-pinea de inmediato cualquier panel
     // auto-oculto (ver panelsResetRequested en PreferencesDialog.hpp); si el
@@ -184,6 +189,10 @@ private:
     // como flyout, si no hace el show()/raise() de siempre.
     void revealDock(QDockWidget* dock);
     [[nodiscard]] bool isAutoHidden(QDockWidget* dock) const;
+    // Muestra el dialogo modal de Propiedades para `componentId` (doble clic
+    // en el lienzo, o "Propiedades" del menu contextual) - bloquea el resto
+    // de la ventana hasta que se cierra, ver PropertiesDialog en setupDocks().
+    void openPropertiesDialog(uint32_t componentId);
     void setupMenusAndToolbars();
     void setupAutosave();
     bool saveToPath(const QString& path);
@@ -297,14 +306,17 @@ private:
     // mismo patron que inspector_/truthTablePanel_/waveformPanel_.
     ui::MiniMapView* miniMap_ = nullptr;
     ui::PropertyInspector* inspector_ = nullptr;
+    // Dialogo modal que aloja a inspector_ (ver openPropertiesDialog()) - a
+    // diferencia de truthTableDock_/waveformDock_, Propiedades ya no vive en
+    // un panel anclado: se abre a demanda (doble clic sobre un componente, o
+    // "Propiedades" del menu contextual) y bloquea el resto de la ventana
+    // mientras esta abierto.
+    QDialog* propertiesDialog_ = nullptr;
     ui::SimulationToolbar* simulationToolbar_ = nullptr;
     ui::TruthTablePanel* truthTablePanel_ = nullptr;
     ui::WaveformPanel* waveformPanel_ = nullptr;
-    // Guardados para poder traer al frente la pestana "Propiedades" desde
-    // onComponentContextMenuRequested(), y para poder ocultarlos/mostrarlos
-    // en conjunto desde el boton "Panel derecho" (ver setupDocks()/
-    // setupMenusAndToolbars()) - los tres comparten una misma pestana.
-    QDockWidget* inspectorDock_ = nullptr;
+    // Guardados para poder traer al frente estos paneles desde codigo (ver
+    // setupDocks()/setupMenusAndToolbars()) - comparten una misma pestana.
     QDockWidget* truthTableDock_ = nullptr;
     QDockWidget* waveformDock_ = nullptr;
 
