@@ -19,12 +19,12 @@
       "typeId": "wiring.input"
     }
   ],
-  "digitalForgeVersion": "0.1.0",
+  "digitalForgeVersion": "0.1.4",
   "libraries": [
     {
       "contentHash": "eb3f08ca5939085f4dbb4a6f2dd94f4a2121d7c06e033cd0747d3efbe22e8b80",
       "libraryId": "org.digitalforge.builtin",
-      "version": "0.1.0"
+      "version": "0.1.4"
     }
   ],
   "lockFormatVersion": 1

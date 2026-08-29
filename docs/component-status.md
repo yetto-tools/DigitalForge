@@ -75,9 +75,10 @@ Aritmetica se componen sobre `gates.*`.
 | Componente | typeId | Estado | Notas |
 |---|---|---|---|
 | Latch SR | `memory.srLatch` | Implementado | Dos `GateType::Nor` cruzados. S=R=1 simultaneo es la combinacion invalida clasica (emerge sola de las ecuaciones). |
-| Flip-Flop D | `memory.dFlipFlop` | Implementado | Usa el nuevo `GateType::DFlipFlop` nativo; expone Q y Qn. |
-| Flip-Flop JK | `memory.jkFlipFlop` | Implementado | Conversion JK->D combinacional realimentando el propio Q (`dEquiv = (J & !Q) \| (!K & Q)`) sobre el mismo `GateType::DFlipFlop`. |
-| Registro | `memory.register` | Implementado | Propiedad `bits` (1-64, reutiliza el patron de Fase 2); un `DFlipFlop` por bit compartiendo un CLK comun. Sin `Qn` por bit. |
+| Flip-Flop D | `memory.dFlipFlop` | Implementado | Usa el nuevo `GateType::DFlipFlop` nativo; expone Q y Q'. Propiedad `asyncPresetClear` (apagada por defecto) agrega pines PRE/CLR asincronicos al final de la lista de pines, con polaridad configurable (`presetClearPolarity`, activo-alto por defecto). |
+| Flip-Flop JK | `memory.jkFlipFlop` | Implementado | Conversion JK->D combinacional realimentando el propio Q (`dEquiv = (J & !Q) \| (!K & Q)`) sobre el mismo `GateType::DFlipFlop`. Mismo `asyncPresetClear`/`presetClearPolarity` opcionales que `memory.dFlipFlop`. |
+| Flip-Flop T | `memory.tFlipFlop` | Implementado | T = JK con J=K=T (reusa `addJkFlipFlopStage`); toggle en cada flanco con T=1, mantiene con T=0. Mismo `asyncPresetClear`/`presetClearPolarity` opcionales - sigue siendo el unico modo de forzar un estado conocido a mitad de una simulacion ya corriendo, ya que a diferencia del D/JK ninguna combinacion de T solo (sin CLK) tiene resultado garantizado por si sola en base al Q previo (ver `GateType::DFlipFlop` en `core/GateType.hpp` sobre el valor inicial de Q). |
+| Registro | `memory.register` | Implementado | Propiedad `bits` (1-64, reutiliza el patron de Fase 2); un `DFlipFlop` por bit compartiendo un CLK comun. Sin `Q'` por bit, sin PRE/CLR. |
 
 ## Fase 4 — Subcircuitos
 
@@ -218,13 +219,30 @@ icono de paleta como en el lienzo. `src/editor/MsiShapes.hpp` (nuevo,
 mismo patron que `GateShapes.hpp`) define las formas compartidas entre
 `ui::IconFactory` y `editor::ComponentItem`:
 
-- Multiplexor/Codificador de prioridad: trapecio "muchos a uno" (ancho del
-  lado de entradas, angosto del lado de salida). Decodificador/
-  Demultiplexor: el trapecio espejado, "uno a muchos".
-- Sumador/Restador/Comparador: rectangulo + un glifo vectorial chico
-  ("+"/"-"/"=").
-- Flip-Flop D/JK/Registro: rectangulo + muesca triangular de reloj (solo
-  los disparados por flanco - el Latch SR, de nivel, no la tiene).
+- Multiplexor/Decodificador/Demultiplexor/Codificador de prioridad
+  (`plexers.*`): rectangulo liso (no el trapecio ANSI/IEEE original - el lado
+  angosto dejaba menos ancho real que el que usa el rotulado de pines, asi
+  que el texto se salia del contorno), con sigla corta (DEC/MUX/DEMUX/PRI)
+  pegada arriba del cuerpo en vez del nombre completo, rotulo de cada pin
+  (S0/D0/Y0/valid/etc.) a los costados y ancho medido de verdad
+  (`QFontMetricsF`, `isPlexer` en `rebuildPins()`).
+- Sumador/Restador/Comparador (`arithmetic.*`): mismo tratamiento que
+  Plexers - rectangulo liso, sigla corta (ADD/SUB/CMP), rotulo de cada pin
+  (A0/B0/Cin/Sum0/Cout/GT/EQ/LT/etc.) y ancho medido de verdad
+  (`isArithmetic`); reemplaza el glifo vectorial chico ("+"/"-"/"=") y el
+  nombre completo centrado que tenia antes, que dejaban de entrar una vez
+  que las dos columnas de rotulos ocupan los costados.
+- Flip-Flop D/JK/T/Registro: rectangulo + muesca triangular de reloj (solo
+  los disparados por flanco - el Latch SR, de nivel, no la tiene). A
+  diferencia del resto de los bloques MSI, `memory.*` SI rotula sus pines en
+  el lienzo (ver el parrafo "fuera de alcance" mas abajo) y agrega burbuja
+  de negacion sobre Q' (y sobre PRE/CLR cuando su polaridad es activa en
+  bajo), mas un punto de estado en vivo junto al rotulo "Q" con el mismo
+  esquema de color de 5 valores que un LED. El icono de paleta distingue
+  los cinco tipos con una marca vectorial chica (punto/s, circulo hueco o
+  lineas de bus) en vez de texto - `ui::IconFactory` evita `drawText` por
+  el mismo motivo documentado en `wiring.constant` (falla en algunos
+  entornos si se renderiza texto sobre un icono construido tan temprano).
 - Subcircuito: rectangulo con doble contorno (documento embebido).
 
 Ademas, `io.hexDisplay`/`io.ledMatrix`/`io.terminal` (Fase B) pasaron de la
@@ -236,12 +254,13 @@ en `drawSevenSegmentDigit()`/`computeSevenSegmentDigitRect()`), la matriz
 LED dibuja una grilla real de circulos coloreados en vivo, y la terminal
 muestra el caracter ASCII decodificado del byte actual.
 
-**Fuera de alcance, senalado explicitamente**: ningun bloque MSI
-(Plexers/Aritmetica/Memoria/Subcircuitos) muestra el nombre de sus pines en
-el lienzo todavia - el `width_` por defecto (32px) no alcanza para texto
-legible en componentes de hasta 130 pines (p. ej. el sumador de 64 bits);
-requeriria repensar el sizing de `ComponentItem::rebuildPins()`, un cambio
-aparte.
+**Fuera de alcance, senalado explicitamente**: de los bloques MSI, solo
+Subcircuitos sigue sin mostrar el nombre de sus pines en el lienzo (los
+pines de un subcircuito son arbitrarios, definidos por su documento embebido,
+asi que el mismo tratamiento medido de verdad aplicaria igual - no se hizo
+todavia). Memoria/Plexers/Aritmetica ya lo hacen, cada uno con su propio
+ancho medido de verdad en vez del generico 32px (`isMemory`/`isPlexer`/
+`isArithmetic` en `rebuildPins()`) - ver el parrafo de arriba.
 
 ## Driver BCD y color configurable (E/S)
 
@@ -273,12 +292,11 @@ aparte.
   muesca semicircular concava de "pin 1" (un recorte real, no un bulto -
   se "borra" el tramo del borde con un chord del color de fondo antes de
   dibujar el arco), y el nombre de cada pin (`bit0..bit3` a la izquierda,
-  `a..g` a la derecha) - a diferencia de Plexers/Aritmetica/Memoria/
-  Subcircuitos (ver la nota de alcance de mas arriba), ic74ls.* si muestra
-  etiquetas de pin: gana su propio ancho (90px, no el generico 32px) y su
-  propio pitch vertical entre pines (16px, el doble del generico 8px) para
-  que hasta 7 etiquetas por lado (`a..g`) no queden amontonadas ni se
-  superpongan entre si.
+  `a..g` a la derecha) - mismo criterio de rotulado que Plexers/Aritmetica/
+  Memoria (ver la nota de alcance de mas arriba), con su propio ancho (90px,
+  no el generico 32px) y su propio pitch vertical entre pines (16px, el
+  doble del generico 8px) para que hasta 7 etiquetas por lado (`a..g`) no
+  queden amontonadas ni se superpongan entre si.
 
 ## Area de interaccion de los componentes (hit-testing)
 
@@ -543,8 +561,8 @@ biestables independientes por paquete) sin duplicarla.
 | 7408 | `ic74ls.quadAnd2` | 4 AND de 2 entradas independientes. |
 | 7432 | `ic74ls.quadOr2` | 4 OR de 2 entradas independientes. |
 | 7486 | `ic74ls.quadXor2` | 4 XOR de 2 entradas independientes. |
-| 7474 | `ic74ls.dualDFlipFlop` | Dos FF D independientes. Sin PRE/CLR (mismo recorte que `memory.dFlipFlop`). |
-| 7476 | `ic74ls.dualJkFlipFlop` | Dos FF JK independientes. Sin PRE/CLR (mismo recorte que `memory.jkFlipFlop`). |
+| 7474 | `ic74ls.dualDFlipFlop` | Dos FF D independientes, cada uno con su propio PR/CLR asincronicos activos en bajo (fijo, sin propiedad de polaridad - fiel al chip real, ver `resolveAsyncPresetClear`). |
+| 7476 | `ic74ls.dualJkFlipFlop` | Dos FF JK independientes, mismo PR/CLR activos en bajo que el 7474. |
 | 7490 | `ic74ls.decadeCounter` | Contador BCD **sincronico** (0-9, envuelve a 0): `D0=NOT(Q0)`, `D1=Q1 XOR (Q0 AND NOT Q3)`, `D2=Q2 XOR (Q0 AND Q1)`, `D3=Q3 XOR ((Q0 AND Q1 AND Q2) OR (Q0 AND Q3))`, ecuaciones verificadas contra el ciclo 0-9 completo tanto a mano como con un test dedicado. `CLR` es sincronico (`D AND NOT(CLR)`, se aplica en el proximo flanco) - no replica las etapas divide-por-2/divide-por-5 cascadeables ni los pines R0(1)/R0(2)/R9(1)/R9(2) del 7490 real (el primitivo `GateType::DFlipFlop` no tiene un tercer pin de clear). |
 | 74151 | `ic74ls.mux8to1` | Mux de 8 lineas + `Strobe` activo en bajo (fuerza `Y=0`/`W=1` si esta en alto) + salida complementaria `W`. |
 | 74138 | `ic74ls.decoder3to8` | Decoder de 8 salidas activas en bajo, habilitado por `G1` (alto) y `G2A`/`G2B` (bajo) - deshabilitado, todas las salidas quedan en alto. |

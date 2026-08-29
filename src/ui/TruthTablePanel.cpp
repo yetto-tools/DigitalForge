@@ -18,14 +18,17 @@
 #include <stdexcept>
 
 #include "editor/CircuitDocument.hpp"
+#include "editor/Project.hpp"
 #include "editor/TruthTable.hpp"
+#include "editor/TruthTableDocument.hpp"
 
 namespace digitalforge::ui {
 
 using editor::CircuitDocument;
+using editor::KarnaughCellValue;
 
-TruthTablePanel::TruthTablePanel(editor::CircuitDocument* document, QWidget* parent)
-    : QWidget(parent), document_(nullptr) {
+TruthTablePanel::TruthTablePanel(editor::Project* project, editor::CircuitDocument* document, QWidget* parent)
+    : QWidget(parent), project_(project), document_(nullptr) {
     auto* layout = new QVBoxLayout(this);
 
     statusLabel_ = new QLabel(tr("Presione Generar para calcular la tabla de verdad."), this);
@@ -39,9 +42,18 @@ TruthTablePanel::TruthTablePanel(editor::CircuitDocument* document, QWidget* par
     exportButton_->setEnabled(false);
     connect(exportButton_, &QPushButton::clicked, this, &TruthTablePanel::onExportClicked);
 
+    convertButton_ = new QPushButton(tr("Convertir en tabla editable"), this);
+    convertButton_->setEnabled(false);
+    convertButton_->setToolTip(
+        tr("Crea una tabla de verdad editable con estos mismos valores -- desde ahi se pueden generar mapas de "
+           "Karnaugh y volver a sintetizar el circuito, igual que con una tabla armada a mano. Solo disponible con "
+           "entre 2 y 4 entradas."));
+    connect(convertButton_, &QPushButton::clicked, this, &TruthTablePanel::onConvertClicked);
+
     auto* buttonRow = new QHBoxLayout;
     buttonRow->addWidget(generateButton_);
     buttonRow->addWidget(exportButton_);
+    buttonRow->addWidget(convertButton_);
     layout->addLayout(buttonRow);
 
     table_ = new QTableWidget(this);
@@ -79,6 +91,8 @@ void TruthTablePanel::invalidate() {
     formulaLabel_->clear();
     formulaLabel_->setVisible(false);
     exportButton_->setEnabled(false);
+    convertButton_->setEnabled(false);
+    lastResult_ = editor::TruthTable{};
     statusLabel_->setText(tr("El circuito cambio - presione Generar para actualizar la tabla."));
 }
 
@@ -90,10 +104,13 @@ void TruthTablePanel::generate() {
         result = editor::computeTruthTable(*document_);
     } catch (const std::invalid_argument& error) {
         exportButton_->setEnabled(false);
+        convertButton_->setEnabled(false);
+        lastResult_ = editor::TruthTable{};
         statusLabel_->setText(QString::fromUtf8(error.what()));
         return;
     }
 
+    lastResult_ = result;
     table_->clear();
     const int inputCount = static_cast<int>(result.inputHeaders.size());
     const int outputCount = static_cast<int>(result.outputHeaders.size());
@@ -131,10 +148,48 @@ void TruthTablePanel::generate() {
     formulaLabel_->setVisible(true);
 
     exportButton_->setEnabled(true);
+    convertButton_->setEnabled(inputCount >= 2 && inputCount <= 4);
     statusLabel_->setText(tr("Tabla generada: %1 entradas, %2 salidas, %3 combinaciones.")
                                .arg(inputCount)
                                .arg(outputCount)
                                .arg(result.rows.size()));
+}
+
+void TruthTablePanel::onConvertClicked() {
+    const int variableCount = static_cast<int>(lastResult_.inputHeaders.size());
+    const int outputCount = static_cast<int>(lastResult_.outputHeaders.size());
+    if (variableCount < 2 || variableCount > 4) {
+        return; // el boton deberia estar deshabilitado en este caso, ver generate()
+    }
+
+    const QString suggested = project_->suggestUniqueDocumentName(tr("Tabla desde circuito"));
+    const uint32_t newId = project_->addTruthTableDocument(suggested, variableCount);
+    editor::TruthTableDocument* doc = project_->truthTableDocument(newId);
+
+    for (int i = 0; i < variableCount; ++i) {
+        doc->setVariableName(i, lastResult_.inputHeaders[static_cast<std::size_t>(i)]);
+    }
+    doc->setOutputName(0, lastResult_.outputHeaders[0]);
+    for (int o = 1; o < outputCount; ++o) {
+        doc->addOutput(lastResult_.outputHeaders[static_cast<std::size_t>(o)]);
+    }
+
+    // computeTruthTable() ya numera result.rows con la misma convencion
+    // bit-i-es-variable-i que TruthTableDocument/KarnaughMap (ver
+    // TruthTable.cpp, el barrido usa "combination" directo como indice), asi
+    // que el indice de fila es directamente el minterm -- sin ninguna
+    // inversion de bits (esa inversion es solo de como TruthTableView
+    // DIBUJA filas, no de como se guardan).
+    for (std::size_t minterm = 0; minterm < lastResult_.rows.size(); ++minterm) {
+        const editor::TruthTableRow& row = lastResult_.rows[minterm];
+        for (int o = 0; o < outputCount; ++o) {
+            const char c = row.values[static_cast<std::size_t>(variableCount + o)];
+            const KarnaughCellValue value = c == '1'   ? KarnaughCellValue::One
+                                             : c == '0' ? KarnaughCellValue::Zero
+                                                         : KarnaughCellValue::DontCare; // Z/X/E -> "no importa"
+            doc->setCellValue(o, static_cast<int>(minterm), value);
+        }
+    }
 }
 
 void TruthTablePanel::onExportClicked() {

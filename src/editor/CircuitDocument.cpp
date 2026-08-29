@@ -159,7 +159,6 @@ uint32_t CircuitDocument::addWire(WireEndpoint a, WireEndpoint b) {
     } else if (!junctions_.contains(b.id)) {
         throw std::invalid_argument("addWire: unknown junction");
     }
-
     const uint32_t id = nextWireId_++;
     wires_[id] = WireConnection{id, a, b, {}};
     emit wireAdded(id);
@@ -196,7 +195,9 @@ bool CircuitDocument::retargetWire(uint32_t wireId, bool endIsA, WireEndpoint ne
     if (it == wires_.end()) {
         return false;
     }
-    // El nuevo destino debe existir.
+    // El nuevo destino debe existir -- un pin acepta cuantos cables hagan
+    // falta (ver wiresAttachedToPin() en el header), asi que aca solo se
+    // valida que el pin/union exista, no su cantidad de cables.
     if (!newEndpoint.isJunction) {
         const auto* comp = component(newEndpoint.id);
         if (comp == nullptr || newEndpoint.pinIndex >= comp->pins().size()) {
@@ -254,14 +255,15 @@ std::vector<WireConnection> CircuitDocument::wiresAttachedToComponent(uint32_t c
     return result;
 }
 
-bool CircuitDocument::pinHasWire(PinRef pin) const {
+std::vector<WireConnection> CircuitDocument::wiresAttachedToPin(PinRef pin) const {
+    std::vector<WireConnection> result;
     const WireEndpoint endpoint{pin};
     for (const auto& [id, w] : wires_) {
         if (w.a == endpoint || w.b == endpoint) {
-            return true;
+            result.push_back(w);
         }
     }
-    return false;
+    return result;
 }
 
 void CircuitDocument::addJunctionWithId(uint32_t junctionId, QPointF position) {

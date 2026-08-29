@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.4"
 #endif
 #define MyAppName "DigitalForge"
 #define MyAppExeName "DigitalForge.exe"
@@ -29,6 +29,14 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "associate"; Description: "Asociar los archivos .dfproj y .dfc con {#MyAppName}"; GroupDescription: "Asociaciones de archivo"
+
+; Limpia por completo la carpeta de una instalacion anterior antes de copiar
+; los archivos nuevos: [Files] solo agrega/sobreescribe, nunca borra un
+; archivo que exista en la version vieja pero ya no en la nueva (una DLL de
+; Qt renombrada, un plugin descontinuado), y esos restos podian quedar
+; convviviendo con el ejecutable nuevo.
+[InstallDelete]
+Type: filesandordirs; Name: "{app}"
 
 [Files]
 Source: "dist\DigitalForge\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs

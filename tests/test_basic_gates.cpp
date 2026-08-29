@@ -93,3 +93,14 @@ TEST_CASE("isValidInputCount rejects wrong arities", "[gates][validation]") {
     CHECK(isValidInputCount(GateType::InputPin, 0));
     CHECK_FALSE(isValidInputCount(GateType::InputPin, 1));
 }
+
+TEST_CASE("isValidInputCount accepts DFlipFlop with 2 (D/CLK) or 4 (D/CLK/PRE/CLR) inputs, nothing else",
+          "[gates][validation][dflipflop]") {
+    using digitalforge::core::isValidInputCount;
+    CHECK(isValidInputCount(GateType::DFlipFlop, 2));
+    CHECK(isValidInputCount(GateType::DFlipFlop, 4));
+    CHECK_FALSE(isValidInputCount(GateType::DFlipFlop, 0));
+    CHECK_FALSE(isValidInputCount(GateType::DFlipFlop, 1));
+    CHECK_FALSE(isValidInputCount(GateType::DFlipFlop, 3));
+    CHECK_FALSE(isValidInputCount(GateType::DFlipFlop, 5));
+}

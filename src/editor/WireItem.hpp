@@ -2,11 +2,13 @@
 
 #include <QGraphicsPathItem>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <vector>
 
 #include "CircuitDocument.hpp"
+#include "WireRouting.hpp"
 
 class QUndoStack;
 
@@ -24,20 +26,23 @@ struct WireAnchor {
     JunctionItem* junction = nullptr;
 };
 
-// Un unico cable ortogonal de 1 bit entre dos extremos (pin o punto de
-// union). Es puramente presentacional: su trazado auto-enruta con quiebres
-// en angulo recto entre las posiciones de escena actuales de sus extremos,
-// atravesando ademas cualquier waypoint que el usuario haya definido a mano
-// (ver CircuitDocument::WireConnection::waypoints); su color refleja el
-// valor actual de la red consultado a CircuitDocument en el momento de
-// dibujar - nunca calcula la logica por si mismo.
+// Un unico cable ortogonal de 1 bit entre dos extremos (pin o punto de union).
+// Es puramente presentacional: su forma es una funcion pura de las posiciones
+// de escena de sus extremos mas los quiebres guardados en
+// CircuitDocument::WireConnection::waypoints (ver WireRouting.hpp), y su
+// color refleja el valor de la red consultado a CircuitDocument en el momento
+// de dibujar - nunca calcula la logica por si mismo.
 //
-// Tambien maneja sus propios eventos de mouse (no tiene ItemIsMovable) para
-// permitir arrastrar/agregar/quitar los puntos de quiebre de su trazado; a
-// diferencia de mover un componente (donde SelectionTool arma el comando de
-// undo comparando posiciones antes/despues del gesto), aca el propio
-// WireItem arma su SetWireWaypointsCommand al soltar, porque es el unico
-// que conoce el estado intermedio del arrastre.
+// Maneja sus propios eventos de mouse (no tiene ItemIsMovable) con los gestos
+// de Proteus:
+//   - arrastrar el CUERPO desplaza ese segmento perpendicular a si mismo,
+//     conservando los angulos rectos con sus vecinos;
+//   - arrastrar una ESQUINA la lleva a donde este el cursor;
+//   - arrastrar el handle de un EXTREMO (con el cable seleccionado) lo
+//     reconecta a otro pin/union.
+// Ninguno de los tres crea conexiones electricas por proximidad: conectar es
+// siempre terminar un cable explicitamente sobre un pin, una union u otro
+// cable (ver WireTool).
 class WireItem : public QGraphicsPathItem {
 public:
     WireItem(CircuitDocument* document, QUndoStack* undoStack, uint32_t wireId, WireEndpoint a, WireEndpoint b,
@@ -45,12 +50,21 @@ public:
     ~WireItem() override;
 
     [[nodiscard]] uint32_t wireId() const noexcept { return wireId_; }
+    [[nodiscard]] const WireAnchor& anchorA() const noexcept { return anchorA_; }
+    [[nodiscard]] const WireAnchor& anchorB() const noexcept { return anchorB_; }
+
+    // Desplazamiento transitorio (no persistido) que se suma a los waypoints
+    // guardados mientras dura un arrastre de seleccion multiple -- ver
+    // SelectionTool::afterMove(). std::nullopt = sin desplazamiento (uso
+    // normal). El propio SelectionTool es quien comete el resultado final a
+    // CircuitDocument via SetWireWaypointsCommand al soltar, y recien ahi
+    // limpia el offset.
+    void setLiveWaypointOffset(std::optional<QPointF> offset);
 
     // Recalcula el trazado a partir de las posiciones de escena actuales de
-    // los extremos (y, si hay un arrastre de vertice en curso, del punto que
-    // se esta arrastrando). Se llama cada vez que alguno de los
-    // ComponentItem/JunctionItem de los extremos se mueve, o que cambian los
-    // waypoints almacenados en el documento.
+    // los extremos (y, si hay un arrastre en curso, de la polilinea en
+    // edicion). Se llama cada vez que alguno de los ComponentItem/JunctionItem
+    // de los extremos se mueve, o que cambian los waypoints en el documento.
     void updateGeometry();
 
     void paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget) override;
@@ -67,6 +81,12 @@ public:
     // ruta visible del cable, nunca desalineado de ella.
     [[nodiscard]] QPointF nearestPointOnPath(QPointF scenePos) const;
 
+    // Waypoints que deberian quedarle a cada mitad si este cable se parte en
+    // `point` (tipicamente el resultado de nearestPointOnPath()). Usado por
+    // WireTool/SplitWireCommand para que derivar un cable nuevo sobre el
+    // cuerpo de este no le borre el trazado ya acomodado.
+    [[nodiscard]] WireSplit splitWaypointsAt(QPointF point) const;
+
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
     void mouseMoveEvent(QGraphicsSceneMouseEvent* event) override;
@@ -77,43 +97,25 @@ protected:
 
 private:
     [[nodiscard]] QPointF endpointScenePos(const WireEndpoint& endpoint, const WireAnchor& anchor) const;
-    // Waypoints tal como estan guardados hoy en el documento (vacio si el
-    // cable todavia depende por completo del auto-ruteo).
+    // Waypoints tal como estan guardados hoy en el documento.
     [[nodiscard]] std::vector<QPointF> storedWaypoints() const;
-    // Bounding rects de todos los demas ComponentItem (nunca los dos propios
-    // extremos de este cable, si son pines) - ver CircuitScene::
-    // componentObstacleRects(). Vacio si scene() todavia no es una
-    // CircuitScene (p. ej. el frame de construccion, antes de addItem()).
-    [[nodiscard]] std::vector<QRectF> obstacleRects() const;
-    // Indice (en la lista de waypoints) del segmento mas cercano a `point`,
-    // considerando la polilinea completa extremo-waypoints-extremo. Usado
-    // tanto para insertar un vertice nuevo al arrastrar el cuerpo del cable
-    // como al hacer doble clic sobre el.
-    [[nodiscard]] std::size_t nearestSegmentInsertIndex(QPointF point, const std::vector<QPointF>& waypoints) const;
-    // Todas las esquinas VISIBLES del cable como una polilinea completa
-    // [extremo A, esquinas..., extremo B], incluyendo los codos auto-ruteados
-    // que todavia no son waypoints guardados. Es lo que permite agarrar y
-    // mover cualquier esquina, no solo las que el usuario ya creo a mano.
-    [[nodiscard]] std::vector<QPointF> renderedCorners() const;
-    // Al empezar a arrastrar la esquina `cornerIndex` de `fullPolyline`,
-    // recuerda si cada brazo (hacia el vecino previo y el siguiente) es
-    // horizontal, para deslizar ese vecino por el eje correcto y conservar el
-    // angulo recto durante todo el gesto.
-    void captureArmOrientations(const std::vector<QPointF>& fullPolyline, std::size_t cornerIndex);
-    // Llamado al soltar un arrastre de vertice (ver mouseReleaseEvent()): si
-    // `dropPoint` cae sobre el cuerpo de otro WireItem o sobre un
-    // JunctionItem existente (ninguno de los dos extremos propios de este
-    // cable), reemplaza este cable por dos tramos nuevos que se encuentran
-    // en un punto de union real ahi -- el mecanismo detras de "llevar una
-    // linea a un nodo" estilo Logisim. Devuelve false (sin efecto) si no hay
-    // nada que empalmar en ese punto, en cuyo caso el llamador debe seguir
-    // con el simple SetWireWaypointsCommand cosmetico de siempre.
-    bool trySpliceAt(int waypointIndex, QPointF dropPoint);
+    // La polilinea VISIBLE completa [extremo A, esquinas..., extremo B],
+    // incluyendo los codos que WireRouting genera y que todavia no son
+    // waypoints guardados. Es sobre esta lista que se agarran los segmentos y
+    // las esquinas, de modo que se pueda tomar cualquier tramo que se vea, no
+    // solo los que el usuario ya fijo a mano.
+    [[nodiscard]] std::vector<QPointF> renderedPolyline() const;
+    // Indice del segmento de `polyline` mas cercano a `point` (el segmento i
+    // va de polyline[i] a polyline[i+1]).
+    [[nodiscard]] static std::size_t nearestSegmentIndex(const std::vector<QPointF>& polyline, QPointF point);
     // Posicion del handle de un extremo (a_ si isA, si no b_): sobre la ruta
     // pero corrido hacia adentro respecto del pin/union, para que se pueda
-    // agarrar sin chocar con el pin (que en modo Selection inicia un cable
-    // nuevo). Ver paint()/mousePressEvent().
+    // agarrar sin chocar con el pin (que inicia un cable nuevo).
     [[nodiscard]] QPointF endpointHandlePos(bool isA) const;
+    // Guarda la polilinea en edicion como waypoints del documento (descarta
+    // los dos extremos, que los ancla su pin/union). No hace nada si no
+    // cambio nada respecto de lo guardado.
+    void commitDragPolyline();
 
     CircuitDocument* document_;
     QUndoStack* undoStack_;
@@ -123,34 +125,32 @@ private:
     WireAnchor anchorA_;
     WireAnchor anchorB_;
 
-    // Estado de un arrastre de vertice en curso (ya sea de un waypoint
-    // existente, o de uno recien insertado al empezar a arrastrar el cuerpo
-    // del cable).
-    bool dragging_ = false;
+    // Que se esta remodelando, si es que hay algo en curso.
+    enum class DragKind {
+        None,
+        Segment, // arrastre del cuerpo: desplaza un tramo entero
+        Corner,  // arrastre de una esquina
+    };
+    DragKind dragKind_ = DragKind::None;
+    std::size_t dragIndex_ = 0;
+    // Polilinea completa (con extremos) al empezar el gesto. Cada movimiento
+    // del mouse se recalcula SIEMPRE desde esta base y no desde el resultado
+    // anterior: moveWireSegment() puede insertar vertices de absorcion en los
+    // extremos, y aplicarlo de forma acumulativa los iria apilando.
+    std::vector<QPointF> dragBasePolyline_;
+    // Resultado vigente del gesto (lo que se dibuja mientras dura).
+    std::vector<QPointF> dragPolyline_;
+
     bool hovered_ = false;
-    int dragIndex_ = -1;
-    std::vector<QPointF> dragWaypoints_;
-    // El vertice en arrastre se acaba de insertar sobre el cuerpo del cable
-    // (no es una esquina preexistente): se mueve libre sin arrastrar a sus
-    // vecinos, para "sacar" un desvio nuevo. Una esquina preexistente si
-    // desliza a sus vecinos (ver mouseMoveEvent).
-    bool dragInserted_ = false;
-    // Orientacion de cada brazo de la esquina en arrastre, capturada al
-    // agarrarla (ver captureArmOrientations()).
-    bool leftArmHorizontal_ = false;
-    bool rightArmHorizontal_ = false;
 
     // Estado de un arrastre de extremo en curso (reconexion): que extremo se
     // esta moviendo y a que punto de escena sigue mientras dura el gesto.
     bool endpointDragging_ = false;
     bool endpointDragIsA_ = false;
     QPointF endpointDragPos_;
-    // Posicion del press cuando cayo sobre el cuerpo del cable (lejos de
-    // cualquier vertice existente): la insercion de un vertice nuevo se
-    // posterga hasta que el mouse efectivamente se mueva mas alla de un
-    // umbral, para que un clic simple (sin arrastre) siga sirviendo solo
-    // para seleccionar el cable sin alterar su trazado.
-    std::optional<QPointF> pendingInsertAt_;
+
+    // Ver setLiveWaypointOffset().
+    std::optional<QPointF> liveWaypointOffset_;
 };
 
 } // namespace digitalforge::editor

@@ -7,6 +7,15 @@ add_executable(digitalforge_qt_tests
     test_logisim_importer.cpp
     test_subcircuit.cpp
     test_truth_table.cpp
+    test_karnaugh_map.cpp
+    test_karnaugh_synthesizer.cpp
+    test_karnaugh_document.cpp
+    test_karnaugh_serializer.cpp
+    test_truth_table_document.cpp
+    test_truth_table_serializer.cpp
+    test_flip_flop_excitation.cpp
+    test_excitation_table_document.cpp
+    test_excitation_table_serializer.cpp
     test_waveform_recorder.cpp
     test_wire_routing.cpp
     test_project_compatibility.cpp
@@ -16,11 +25,20 @@ add_executable(digitalforge_qt_tests
     ${CMAKE_SOURCE_DIR}/src/editor/UndoCommands.cpp
     ${CMAKE_SOURCE_DIR}/src/editor/Project.cpp
     ${CMAKE_SOURCE_DIR}/src/editor/TruthTable.cpp
+    ${CMAKE_SOURCE_DIR}/src/editor/KarnaughMap.cpp
+    ${CMAKE_SOURCE_DIR}/src/editor/KarnaughDocument.cpp
+    ${CMAKE_SOURCE_DIR}/src/editor/TruthTableDocument.cpp
+    ${CMAKE_SOURCE_DIR}/src/editor/FlipFlopExcitation.cpp
+    ${CMAKE_SOURCE_DIR}/src/editor/ExcitationTableDocument.cpp
     ${CMAKE_SOURCE_DIR}/src/editor/WaveformRecorder.cpp
     ${CMAKE_SOURCE_DIR}/src/formats/ProjectManifestSerializer.cpp
     ${CMAKE_SOURCE_DIR}/src/formats/ProjectSerializer.cpp
     ${CMAKE_SOURCE_DIR}/src/formats/LockFile.cpp
     ${CMAKE_SOURCE_DIR}/src/formats/LogisimImporter.cpp
+    ${CMAKE_SOURCE_DIR}/src/formats/KarnaughSynthesizer.cpp
+    ${CMAKE_SOURCE_DIR}/src/formats/KarnaughSerializer.cpp
+    ${CMAKE_SOURCE_DIR}/src/formats/TruthTableSerializer.cpp
+    ${CMAKE_SOURCE_DIR}/src/formats/ExcitationTableSerializer.cpp
 )
 target_link_libraries(digitalforge_qt_tests PRIVATE digitalforge_components Qt6::Core Qt6::Widgets Catch2::Catch2)
 

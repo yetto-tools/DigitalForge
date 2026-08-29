@@ -4,6 +4,60 @@ Todas las versiones publicables de DigitalForge se listan aquí. El formato
 sigue, a grandes rasgos, [Keep a Changelog](https://keepachangelog.com/es/),
 y el versionado es [semántico](https://semver.org/lang/es/).
 
+## v0.1.4 — pre-alpha
+
+### Correcciones
+- **v0.1.3 tampoco alcanzaba**: exigir version y huella coincidentes antes de
+  restaurar el layout de paneles no evito el mismo crash "aparece el splash
+  y se cierra" en un caso real (mismo instalador, version y huella
+  identicas). La causa exacta de por que restaurar un "MainWindow/state"
+  puntual a veces deja corrupto el auto-hide de paneles no se pudo aislar
+  con certeza; en vez de seguir intentando adivinar cuando es seguro
+  hacerlo, se elimino la unica operacion que alguna vez crasheo: ya no se
+  auto-oculta ningun panel a partir de una sesion anterior (si, tenias
+  paneles colapsados, arrancan pineados y podes volver a ocultarlos con un
+  click). El tamano/posicion de ventana y el resto de la disposicion de
+  docks/toolbars se siguen restaurando con normalidad.
+
+## v0.1.3 — pre-alpha
+
+### Correcciones
+- **v0.1.2 no era suficiente**: la huella de docks/toolbars por si sola no
+  alcanzaba para detectar un `MainWindow/state` guardado por una instalacion
+  anterior (versiones distintas pueden compartir el mismo conjunto de
+  paneles). Ahora se exige tambien que la version que guardo el estado
+  coincida con la actual; si no, se usa la disposicion de fabrica.
+- Instalador de Windows: limpia por completo la carpeta de una instalacion
+  anterior antes de copiar los archivos nuevos, para no dejar restos de
+  versiones previas (DLLs o plugins descontinuados) conviviendo con la
+  instalacion actual.
+
+## v0.1.2 — pre-alpha
+
+### Correcciones
+- **Crash al reabrir la app** ("aparece el splash y se cierra"): un
+  `MainWindow/state` guardado por una versión anterior (con otro conjunto de
+  paneles/barras) dejaba corrupto el layout interno de Qt al restaurar los
+  paneles auto-ocultos de la sesión previa. Ahora se guarda una huella de la
+  disposición de paneles/barras junto con el estado, y se descarta el estado
+  guardado (usando la disposición de fábrica) si no coincide con la actual.
+
+## v0.1.1 — pre-alpha
+
+### Editor gráfico (Qt6)
+- **Enrutamiento automático de cables con obstáculos**: el trazado ortogonal
+  ahora detecta componentes y otros cables en el camino y los rodea, en vez de
+  cruzarlos en línea recta.
+- Edición interactiva de cables ampliada: arrastre de segmentos y uniones,
+  desplazamiento de los cables junto con la selección múltiple, y
+  sincronización de componentes y cables durante el arrastre.
+- Pines de los componentes centrados de forma uniforme.
+- Corrección: el modo de tema "Sistema" ahora sigue en vivo los cambios de
+  tema claro/oscuro de Windows en vez de quedar congelado en el que estaba
+  activo al arrancar.
+- Gestión de estilos de la aplicación simplificada: se usa directamente el
+  estilo nativo/Fusion estándar de Qt.
+
 ## v0.1.0-alpha — pre-lanzamiento
 
 Primer pre-lanzamiento público (alpha). Editor y simulador de lógica digital

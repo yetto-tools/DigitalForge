@@ -127,6 +127,7 @@ nlohmann::json serializeProject(const CircuitDocument& document) {
         c["position"] = {{"x", placement.position.x()}, {"y", placement.position.y()}};
         c["rotation"] = placement.rotationDegrees;
         c["zOrder"] = placement.zOrder;
+        c["labelOffset"] = {{"x", placement.labelOffset.x()}, {"y", placement.labelOffset.y()}};
         components.push_back(std::move(c));
     }
     json["components"] = std::move(components);
@@ -189,6 +190,13 @@ void loadProject(CircuitDocument& document, const nlohmann::json& json, ProjectC
         // apilaban por orden de insercion, equivalente a que todos
         // compartan 0).
         placement.zOrder = c.contains("zOrder") ? c.at("zOrder").get<int>() : 0;
+        // "labelOffset" es otro campo aditivo -- ausente en archivos
+        // guardados antes de que la etiqueta se pudiera arrastrar (todas
+        // quedaban en su posicion por defecto, equivalente a (0,0)).
+        if (c.contains("labelOffset")) {
+            placement.labelOffset =
+                QPointF(c.at("labelOffset").at("x").get<double>(), c.at("labelOffset").at("y").get<double>());
+        }
 
         document.addComponentWithId(parsed.instanceId(), typeId, overrides, placement);
 

@@ -7,6 +7,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <span>
 #include <string>
@@ -110,6 +111,14 @@ struct ComponentPlacement {
     // frente"/"Enviar al fondo"/etc (ver CircuitScene::bringSelectedToFront()
     // y companeros) lo ajustan relativo al resto.
     int zOrder = 0;
+    // Desplazamiento (en el espacio LOCAL del componente, igual que los
+    // pines) de la etiqueta de instancia respecto de su posicion por
+    // defecto (debajo del cuerpo) -- (0,0) es esa posicion por defecto, para
+    // que los proyectos guardados antes de que existiera este campo se vean
+    // identicos. Se arrastra directamente sobre ComponentItem (ver
+    // ComponentItem::mousePressEvent), nunca via SelectionTool -- es un gesto
+    // propio del item, no una reubicacion del componente.
+    QPointF labelOffset{0.0, 0.0};
 };
 
 // Es propietario de cada ComponentInstance colocado y de cada WireConnection
@@ -194,7 +203,13 @@ public:
     [[nodiscard]] const WireConnection* wire(uint32_t wireId) const;
     [[nodiscard]] std::vector<uint32_t> wireIds() const;
     [[nodiscard]] std::vector<WireConnection> wiresAttachedToComponent(uint32_t componentId) const;
-    [[nodiscard]] bool pinHasWire(PinRef pin) const;
+    // Todos los cables conectados directamente a este pin - un pin acepta
+    // cuantos cables hagan falta (igual criterio que un punto de union, ver
+    // wiresAttachedToJunction()), asi que puede haber 0, 1 o varios. Sirve
+    // tanto para el punto de empalme relleno cuando hay 2+ (ver
+    // PinItem::paint()) como para cualquier chequeo de conectividad
+    // ("size() >= 1" reemplaza al viejo pinHasWire()/"tiene algun cable").
+    [[nodiscard]] std::vector<WireConnection> wiresAttachedToPin(PinRef pin) const;
 
     // Punto de union libre: ver el comentario de Junction mas arriba.
     // reserveJunctionId()/addJunctionWithId() siguen el mismo patron de

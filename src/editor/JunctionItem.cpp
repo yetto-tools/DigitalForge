@@ -28,16 +28,24 @@ JunctionItem::JunctionItem(CircuitDocument* document, uint32_t junctionId, QGrap
 }
 
 void JunctionItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget*) {
-    if (document_->wiresAttachedToJunction(junctionId_).size() < 2) {
-        return;
-    }
-    const core::LogicValue value = document_->endpointValue(WireEndpoint::junction(junctionId_));
     const bool selected = (option->state & QStyle::State_Selected) != 0;
-    painter->setPen(QPen(Qt::black, selected ? 2.0 : 1.0));
-    painter->setBrush(logicValueColor(value));
     // Al pasar el mouse, agrandar un poco el punto para que se note que es
     // agarrable/arrastrable, sin cambiar su semantica de color.
     const QRectF r = hovered_ ? rect().adjusted(-1.5, -1.5, 1.5, 1.5) : rect();
+
+    if (document_->wiresAttachedToJunction(junctionId_).size() < 2) {
+        // Punta de cable "al aire": hueca y en gris (nunca el color de
+        // ningun valor logico real, para no sugerir una conexion que no
+        // existe), pero SIEMPRE dibujada -- sigue siendo un punto agarrable.
+        painter->setPen(QPen(QColor(150, 150, 150), selected ? 2.0 : 1.0, selected ? Qt::SolidLine : Qt::DashLine));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawEllipse(r);
+        return;
+    }
+
+    const core::LogicValue value = document_->endpointValue(WireEndpoint::junction(junctionId_));
+    painter->setPen(QPen(Qt::black, selected ? 2.0 : 1.0));
+    painter->setBrush(logicValueColor(value));
     painter->drawEllipse(r);
 }
 

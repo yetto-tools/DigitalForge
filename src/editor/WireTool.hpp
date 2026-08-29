@@ -2,6 +2,7 @@
 
 #include <QPointF>
 
+#include <optional>
 #include <vector>
 
 #include "CircuitDocument.hpp"
@@ -60,7 +61,38 @@ public:
     [[nodiscard]] bool isDrawing() const noexcept { return drawing_; }
 
 private:
+    // Eje del tramo que se esta trazando. Lo fija la direccion del primer
+    // movimiento del mouse tras el ultimo punto fijado y NO cambia hasta que
+    // se fija una esquina: asi, arrancar bajando hace crecer el cable hacia
+    // abajo, y recien al moverse a los costados aparece la esquina y ese
+    // segundo tramo se alarga. Si el eje se recalculara todo el tiempo, el
+    // codo se daria vuelta solo al cruzar la diagonal.
+    enum class Axis {
+        None, // todavia sin movimiento suficiente para decidir
+        Horizontal,
+        Vertical,
+    };
+
     [[nodiscard]] WireGestureEndpoint hitTest(QPointF scenePos) const;
+    // Fija el eje si todavia no lo esta y el cursor ya se alejo lo bastante
+    // del ultimo punto -- y en una direccion lo bastante dominante -- como para
+    // que la eleccion sea inequivoca. Sobre la diagonal no fija nada.
+    void updateAxis(QPointF cursorScenePos);
+    // Ultimo vertice del trazado en curso: la ultima esquina acumulada, o el
+    // ultimo punto fijado con clic si todavia no hay ninguna.
+    [[nodiscard]] QPointF lastVertex() const;
+    // Agrega una esquina cada vez que el cursor se desvia del eje actual mas
+    // que el umbral de creacion, y la quita si vuelve sobre sus pasos por
+    // debajo del umbral (mas chico) de retraccion. Moverse en diagonal va
+    // dejando asi una escalera de escalones en angulo recto.
+    void accumulateSteps(QPointF cursorScenePos);
+    // La esquina del tramo en curso segun el eje fijado, o nullopt si el tramo
+    // sale recto (no hace falta codo) o si todavia no hay eje.
+    [[nodiscard]] std::optional<QPointF> autoCorner(QPointF from, QPointF to) const;
+    // Los vertices del trazado en curso hasta `cursorScenePos`, incluida la
+    // esquina automatica. Compartido por la vista previa y por el commit, para
+    // que el cable que queda sea exactamente el que se estaba viendo.
+    [[nodiscard]] std::vector<QPointF> pointsThrough(QPointF cursorScenePos) const;
     // Convierte un WireGestureEndpoint ya confirmado (extremo final del
     // gesto) en un WireEndpoint concreto, materializando una derivacion
     // pendiente en un punto de union nuevo (via SplitWireCommand) si hace falta.
@@ -85,8 +117,15 @@ private:
     bool drawing_ = false;
     WireGestureEndpoint startHit_;
     std::vector<QPointF> points_;
+    // Esquinas generadas por el propio movimiento del mouse (ver
+    // accumulateSteps()), todavia no confirmadas con un clic. Se pliegan sobre
+    // points_ en cuanto el usuario fija un punto, y se descartan al cancelar.
+    std::vector<QPointF> autoPoints_;
     QPointF pressPos_;
     QGraphicsPathItem* previewPath_ = nullptr;
+    // Se reinicia a None cada vez que se fija una esquina: cada tramo elige su
+    // propia direccion.
+    Axis axis_ = Axis::None;
 };
 
 } // namespace digitalforge::editor

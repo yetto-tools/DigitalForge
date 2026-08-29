@@ -12,6 +12,7 @@
 #include <cmath>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "CircuitDocument.hpp"
 #include "CircuitScene.hpp"
@@ -636,12 +637,27 @@ void ComponentItem::rebuildPins() {
     // para que el piso de 4 franjas de abajo (32 tambien) de una proporcion
     // cercana a 1:1 en el caso mas comun (1-2 pines) - a 64 de ancho quedaba
     // muy alargado a lo horizontal.
-    // ic74ls.* necesita mas ancho que el generico: a diferencia de
-    // Plexers/Aritmetica/Memoria (sin etiquetas de pin, fuera de alcance
-    // por ahora - ver docs/component-status.md), paintIc74ls() si dibuja el
+    // ic74ls.* necesita mas ancho que el generico: paintIc74ls() dibuja el
     // nombre de cada pin (entrada a la izquierda, salida a la derecha), y
-    // 32px no alcanza para texto legible en ambos lados.
+    // 32px no alcanza para texto legible en ambos lados (mismo motivo que
+    // isPlexer/isArithmetic mas abajo, cada uno con su propio ancho medido).
     const bool isIc74ls = instance->typeId().rfind("ic74ls.", 0) == 0;
+    // memory.* (paintMemory()) tambien rotula sus pines ahora (D/CLK/Q/Q',
+    // etc.) y agrega una burbuja de negacion sobre Q'/PRE/CLR cuando
+    // corresponde - 32px alcanzaba para el rectangulo mudo de antes, pero
+    // no para eso.
+    const bool isMemory = instance->typeId().rfind("memory.", 0) == 0;
+    // plexers.* (paintPlexer()) tambien rotula sus pines ahora - mismo
+    // ancho medido de verdad que ic74ls.* (ver icWidth mas abajo), porque
+    // el nombre mas largo ("valid") y la cantidad de pines (2^selectBits,
+    // variable por instancia) no entran en un ancho fijo.
+    const bool isPlexer = instance->typeId().rfind("plexers.", 0) == 0;
+    // arithmetic.* (paintArithmetic()) tambien rotula sus pines ahora
+    // (A0/B0/Cin/Sum0/Cout/GT/EQ/LT/etc.) - mismo ancho medido de verdad que
+    // plexers.*, porque la cantidad de pines por lado escala con la
+    // propiedad "bits" (variable por instancia, hasta 64+64+1 del lado
+    // izquierdo en el sumador/restador).
+    const bool isArithmetic = instance->typeId().rfind("arithmetic.", 0) == 0;
     // Secuencia fisica real del DIP (ver ComponentDefinition::
     // physicalPinout), partida en las dos columnas visuales top-a-bottom:
     // izquierda tal cual (pin1 arriba), derecha invertida (el DIP la
@@ -683,10 +699,62 @@ void ComponentItem::rebuildPins() {
         const qreal rawWidth = 6.0 + 2.0 + leftLabelWidth + centralGapReserve + rightLabelWidth + 2.0;
         icWidth = std::max(52.0, std::ceil(rawWidth / kGridSize) * kGridSize);
     }
+    // Mismo criterio que icWidth de arriba, pero midiendo leftPins/rightPins
+    // (indices por direccion, no physicalPinout - plexers.* no tiene DIP
+    // fisico) en vez de leftSeq/rightSeq.
+    qreal plexerWidth = 40.0;
+    if (isPlexer) {
+        QFont pinFont;
+        pinFont.setPointSizeF(6.5); // igual tamano que paintPlexer()
+        const QFontMetricsF pinFontMetrics(pinFont);
+        qreal leftLabelWidth = 0.0;
+        qreal rightLabelWidth = 0.0;
+        for (const uint16_t idx : leftPins) {
+            leftLabelWidth =
+                std::max(leftLabelWidth, pinFontMetrics.horizontalAdvance(QString::fromStdString(pins[idx].name)));
+        }
+        for (const uint16_t idx : rightPins) {
+            rightLabelWidth =
+                std::max(rightLabelWidth, pinFontMetrics.horizontalAdvance(QString::fromStdString(pins[idx].name)));
+        }
+        // Insets del cuerpo (6) + margen de cada columna (4 c/u, ver
+        // labelMargin en paintPlexer() - subido de 2 porque se sentia
+        // apretado contra el borde/el centro) + las dos columnas medidas +
+        // hueco central de sobra.
+        constexpr qreal centralGapReserve = 26.0;
+        const qreal rawWidth = 6.0 + 4.0 + leftLabelWidth + centralGapReserve + rightLabelWidth + 4.0;
+        plexerWidth = std::max(48.0, std::ceil(rawWidth / kGridSize) * kGridSize);
+    }
+    // Mismo criterio que plexerWidth de arriba.
+    qreal arithmeticWidth = 40.0;
+    if (isArithmetic) {
+        QFont pinFont;
+        pinFont.setPointSizeF(6.5); // igual tamano que paintArithmetic()
+        const QFontMetricsF pinFontMetrics(pinFont);
+        qreal leftLabelWidth = 0.0;
+        qreal rightLabelWidth = 0.0;
+        for (const uint16_t idx : leftPins) {
+            leftLabelWidth =
+                std::max(leftLabelWidth, pinFontMetrics.horizontalAdvance(QString::fromStdString(pins[idx].name)));
+        }
+        for (const uint16_t idx : rightPins) {
+            rightLabelWidth =
+                std::max(rightLabelWidth, pinFontMetrics.horizontalAdvance(QString::fromStdString(pins[idx].name)));
+        }
+        constexpr qreal centralGapReserve = 26.0;
+        const qreal rawWidth = 6.0 + 4.0 + leftLabelWidth + centralGapReserve + rightLabelWidth + 4.0;
+        arithmeticWidth = std::max(48.0, std::ceil(rawWidth / kGridSize) * kGridSize);
+    }
     // isMosLike usa un poco mas de ancho que el generico: la "pata" en
     // angulo (diagonal corta + tramo recto, ver paintTransistor()) necesita
     // lugar para no verse amontonada contra el borde derecho.
-    width_ = isSegmentDisplay ? 72.0 : isIc74ls ? icWidth : isMosLike ? 40.0 : 32.0;
+    width_ = isSegmentDisplay ? 72.0
+             : isIc74ls       ? icWidth
+             : isMosLike      ? 40.0
+             : isMemory       ? 64.0
+             : isPlexer       ? plexerWidth
+             : isArithmetic   ? arithmeticWidth
+                               : 32.0;
     const std::size_t sideCount =
         isIc74ls ? std::max(leftSeq.size(), rightSeq.size()) : std::max(leftPins.size(), rightPins.size());
     // El espaciado vertical entre pines es un multiplo de kGridSize (no
@@ -700,7 +768,14 @@ void ComponentItem::rebuildPins() {
     // transmision necesita mas separacion vertical entre pines para que la
     // barra de control y las diagonales (ver paintMosBarAndDiagonals()) no
     // queden apretadas.
-    const qreal pinPitch = (isIc74ls || isMosLike) ? 12.0 : kGridSize;
+    // isMemory usa un pitch bien mayor que el generico (8) e incluso que el
+    // de ic74ls/isMosLike (12): a diferencia de esos, paintMemory() apila
+    // tres cosas en el mismo cuerpo angosto (linea de pin, rotulo de pin y
+    // la sigla central) y con un pitch chico un lado de cantidad impar (p.
+    // ej. J/K/CLK del flip-flop JK) no dejaba ningun hueco vertical
+    // realmente comodo - se leia amontonado (el defecto reportado, con una
+    // referencia visual de simbolo IEEE espaciado como objetivo).
+    const qreal pinPitch = isMemory ? 18.0 : (isIc74ls || isMosLike || isPlexer || isArithmetic) ? 12.0 : kGridSize;
     // Un componente de un solo pin (NOT/BUFFER, entrada/salida, LED, sonda)
     // solo necesita 2 "franjas" de pinPitch segun la formula de abajo, dando
     // una caja mas baja que ancha; se impone un piso de 4 franjas (32, igual
@@ -740,46 +815,70 @@ void ComponentItem::rebuildPins() {
         height_ = static_cast<qreal>(customHeight);
     }
 
-    // Los pines se distribuyen de forma uniforme a lo largo de toda la
-    // altura en cada lado (no en pasos fijos de kGridSize), de modo que un
-    // lado con menos pines que el otro los centra en lugar de agruparlos
-    // cerca de la parte superior - esto es crucial para que el unico pin de
-    // salida de una puerta se alinee con el centro vertical de su cuerpo.
-    pinStubLength_ = isSegmentDisplay ? 10.0 : 0.0;
+    // El stub tambien es multiplo de la grilla: define la x de los pines de
+    // ese lado, asi que un valor suelto (antes 10) los sacaba de la reticula
+    // igual que cualquier otra medida.
+    pinStubLength_ = isSegmentDisplay ? 8.0 : 0.0;
+
+    // Los pines de cada lado se reparten en pasos EXACTOS de pinPitch y el
+    // grupo entero se centra en el cuerpo. Antes se dividia la altura entre
+    // la cantidad de pines (height_/(n+1)*(i+1)), lo que daba posiciones
+    // fraccionarias en cuanto height_ no fuera divisible: el 7447, por
+    // ejemplo, ponia pines cada 116/9 = 12.888..., y de ahi salian cables
+    // anclados en coordenadas como -16.888888888888886, imposibles de alinear
+    // con la grilla. Con pasos de pinPitch (multiplo de media unidad) y el
+    // grupo centrado, todo pin cae sobre la reticula y ademas queda
+    // exactamente centrado, que es lo que necesita el unico pin de salida de
+    // una puerta para alinearse con el centro vertical de su cuerpo.
+    const auto sideOffsets = [&](std::size_t count) {
+        std::vector<qreal> offsets(count, 0.0);
+        if (count == 0) {
+            return offsets;
+        }
+        const qreal span = pinPitch * static_cast<qreal>(count - 1);
+        // El centrado se cuantiza tambien: con un solo pin en un cuerpo de
+        // altura impar en unidades de grilla, height_/2 podria caer entre dos
+        // lineas.
+        const qreal first = snapToGrid((height_ - span) / 2.0, kGridSize / 2.0);
+        for (std::size_t i = 0; i < count; ++i) {
+            offsets[i] = first + pinPitch * static_cast<qreal>(i);
+        }
+        return offsets;
+    };
 
     pinLocalPositions_.assign(pins.size(), QPointF{});
     if (isIc74ls) {
         // Una franja por posicion fisica (no una por pin real + una por
         // decorativo aparte): reales y decorativos comparten la misma
         // columna, intercalados en el orden exacto del DIP.
+        const std::vector<qreal> leftY = sideOffsets(leftSeq.size());
         for (std::size_t i = 0; i < leftSeq.size(); ++i) {
-            const qreal y = height_ / static_cast<qreal>(leftSeq.size() + 1) * static_cast<qreal>(i + 1);
             if (leftSeq[i].isFunctional) {
                 if (const auto pinIndex = findPinIndexByName(pins, leftSeq[i].label)) {
-                    pinLocalPositions_[*pinIndex] = QPointF(-pinStubLength_, y);
+                    pinLocalPositions_[*pinIndex] = QPointF(-pinStubLength_, leftY[i]);
                 }
             } else {
-                decorativeLeftPositions_.push_back(QPointF(-pinStubLength_, y));
+                decorativeLeftPositions_.push_back(QPointF(-pinStubLength_, leftY[i]));
             }
         }
+        const std::vector<qreal> rightY = sideOffsets(rightSeq.size());
         for (std::size_t i = 0; i < rightSeq.size(); ++i) {
-            const qreal y = height_ / static_cast<qreal>(rightSeq.size() + 1) * static_cast<qreal>(i + 1);
             if (rightSeq[i].isFunctional) {
                 if (const auto pinIndex = findPinIndexByName(pins, rightSeq[i].label)) {
-                    pinLocalPositions_[*pinIndex] = QPointF(width_, y);
+                    pinLocalPositions_[*pinIndex] = QPointF(width_, rightY[i]);
                 }
             } else {
-                decorativeRightPositions_.push_back(QPointF(width_, y));
+                decorativeRightPositions_.push_back(QPointF(width_, rightY[i]));
             }
         }
     } else {
+        const std::vector<qreal> leftY = sideOffsets(leftPins.size());
         for (std::size_t i = 0; i < leftPins.size(); ++i) {
-            const qreal y = height_ / static_cast<qreal>(leftPins.size() + 1) * static_cast<qreal>(i + 1);
-            pinLocalPositions_[leftPins[i]] = QPointF(-pinStubLength_, y);
+            pinLocalPositions_[leftPins[i]] = QPointF(-pinStubLength_, leftY[i]);
         }
+        const std::vector<qreal> rightY = sideOffsets(rightPins.size());
         for (std::size_t i = 0; i < rightPins.size(); ++i) {
-            const qreal y = height_ / static_cast<qreal>(rightPins.size() + 1) * static_cast<qreal>(i + 1);
-            pinLocalPositions_[rightPins[i]] = QPointF(width_, y);
+            pinLocalPositions_[rightPins[i]] = QPointF(width_, rightY[i]);
         }
     }
 
@@ -791,11 +890,28 @@ void ComponentItem::rebuildPins() {
 }
 
 QRectF ComponentItem::boundingRect() const {
-    // Reserva siempre el espacio de la etiqueta de instancia (ver paint()),
-    // este presente o no - evita tener que llamar a prepareGeometryChange()
-    // cada vez que el usuario tipea/borra el texto de "label".
+    // Reserva siempre el espacio de la etiqueta de instancia en su posicion
+    // por defecto (ver paint()), este presente o no - evita tener que llamar
+    // a prepareGeometryChange() cada vez que el usuario tipea/borra el texto
+    // de "label". Si se arrastro a otro lado (effectiveLabelOffset() != 0,0),
+    // se une ese rectangulo trasladado -- si no, offset.isNull() ahorra el
+    // calculo extra en el caso comun.
     constexpr qreal kLabelHeight = 14.0;
-    return QRectF(-pinStubLength_, 0.0, width_ + pinStubLength_, height_ + kLabelHeight);
+    const QRectF bodyAndDefaultLabel(-pinStubLength_, 0.0, width_ + pinStubLength_, height_ + kLabelHeight);
+    const QPointF offset = effectiveLabelOffset();
+    if (offset.isNull()) {
+        return bodyAndDefaultLabel;
+    }
+    return bodyAndDefaultLabel.united(labelBaseRect().translated(offset));
+}
+
+QRectF ComponentItem::labelBaseRect() const { return QRectF(-pinStubLength_, height_ + 2.0, width_ + pinStubLength_, 12.0); }
+
+QPointF ComponentItem::effectiveLabelOffset() const {
+    if (liveLabelOffset_.has_value()) {
+        return *liveLabelOffset_;
+    }
+    return document_->componentPlacement(componentId_).labelOffset;
 }
 
 QPainterPath ComponentItem::shape() const {
@@ -841,6 +957,25 @@ QVariant ComponentItem::itemChange(GraphicsItemChange change, const QVariant& va
     return QGraphicsItem::itemChange(change, value);
 }
 
+bool ComponentItem::labelHitTest(QPointF scenePos) const {
+    const components::ComponentInstance* instance = document_->component(componentId_);
+    if (instance == nullptr || std::get<std::string>(instance->property("label")).empty()) {
+        return false;
+    }
+    return labelBaseRect().translated(effectiveLabelOffset()).contains(mapFromScene(scenePos));
+}
+
+QPointF ComponentItem::labelOffset() const { return document_->componentPlacement(componentId_).labelOffset; }
+
+void ComponentItem::setLiveLabelOffset(std::optional<QPointF> offset) {
+    if (liveLabelOffset_ == offset) {
+        return;
+    }
+    prepareGeometryChange();
+    liveLabelOffset_ = offset;
+    update();
+}
+
 void ComponentItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget*) {
     const components::ComponentInstance* instance = document_->component(componentId_);
     if (instance == nullptr) {
@@ -860,6 +995,15 @@ void ComponentItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* opt
         paintTerminal(painter, selected);
     } else if (typeId == "wiring.input") {
         paintInput(painter, selected);
+    } else if (typeId == "wiring.constant") {
+        // Antes caia en paintGeneric() y se veia como una caja gris con la
+        // palabra "Constante" adentro, sin mostrar si conduce 0 o 1 (el
+        // defecto reportado - habia que abrir el inspector para saberlo).
+        // paintConstant() usa el mismo glifo grande y color por valor que
+        // wiring.input, pero con contorno rectangular (no la punta de
+        // puerto) para no confundirse con una Entrada real, que si es
+        // interactiva.
+        paintConstant(painter, selected);
     } else if (typeId == "wiring.clock") {
         paintClock(painter, selected);
     } else if (typeId == "wiring.powerOnReset") {
@@ -895,9 +1039,10 @@ void ComponentItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* opt
     }
 
     // La etiqueta de instancia (propiedad "label", comun a todos los tipos)
-    // se dibuja debajo de la caja, centrada - hasta ahora solo se usaba en
-    // el inspector/JSON pese a que su descripcion ya decia "mostrado junto
-    // al componente".
+    // se dibuja debajo de la caja por defecto, centrada, pero el usuario
+    // puede arrastrarla a cualquier lado (ver effectiveLabelOffset()) --
+    // hasta ahora solo se usaba en el inspector/JSON pese a que su
+    // descripcion ya decia "mostrado junto al componente".
     const std::string& label = std::get<std::string>(instance->property("label"));
     if (!label.empty()) {
         QFont font = painter->font();
@@ -905,7 +1050,7 @@ void ComponentItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* opt
         painter->setFont(font);
         painter->setPen(labelInkColor());
 
-        const QRectF labelRect(-pinStubLength_, height_ + 2.0, width_ + pinStubLength_, 12.0);
+        const QRectF labelRect = labelBaseRect().translated(effectiveLabelOffset());
         // "labelRotation" (independiente de ComponentPlacement::
         // rotationDegrees, ver makeLabelRotationProperty()) se mide en
         // pantalla, no en el espacio local del item -- se resta la rotacion
@@ -1046,6 +1191,29 @@ void ComponentItem::paintInput(QPainter* painter, bool selected) {
     // redimensionar el componente.
     const QRectF textRect = bodyRect.translated(-bodyRect.height() * 0.095, -bodyRect.height() * 0.045);
     painter->drawText(textRect, Qt::AlignCenter, logicValueGlyph(value));
+}
+
+void ComponentItem::paintConstant(QPainter* painter, bool selected) {
+    // Mismo color/glifo por valor que wiring.input (ver paintInput() arriba),
+    // pero con un contorno rectangular liso en vez de la punta de puerto -
+    // a pedido explicito, para distinguirlo de un vistazo de una Entrada real
+    // (que si es interactiva) ya que ahora se ven casi identicos.
+    const core::LogicValue value = document_->pinValue(componentId_, 0);
+    const QRectF bodyRect(3.0, 6.0, width_ - 7.0, height_ - 12.0);
+
+    painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(20, 20, 20), selected ? 2.0 : 1.5));
+    painter->setBrush(logicValueColor(value));
+    painter->drawRect(bodyRect);
+    painter->drawLine(QPointF(bodyRect.right(), height_ / 2.0), QPointF(width_ - PinItem::kRadius, height_ / 2.0));
+
+    QFont font = painter->font();
+    font.setBold(true);
+    font.setPointSizeF(12.0);
+    painter->setFont(font);
+    painter->setPen(value == core::LogicValue::Zero || value == core::LogicValue::Error ? Qt::white : Qt::black);
+    // Sin la compensacion optica de paintInput(): un rectangulo es simetrico,
+    // el centro geometrico ya es el centro visual correcto.
+    painter->drawText(bodyRect, Qt::AlignCenter, logicValueGlyph(value));
 }
 
 void ComponentItem::paintClock(QPainter* painter, bool selected) {
@@ -1450,9 +1618,17 @@ void ComponentItem::paintHexDisplay(QPainter* painter, bool selected) {
                            QString::fromStdString(instance->pins()[i].name));
     }
 
-    const components::HexDisplayState state =
-        components::hexDisplayState(*instance, document_->pinValue(componentId_, 0), document_->pinValue(componentId_, 1),
-                                     document_->pinValue(componentId_, 2), document_->pinValue(componentId_, 3));
+    // El indice fisico de cada bit depende de la propiedad "bitOrder" (ver
+    // hexDisplayIsMsbFirst() y el derivePins() de io.hexDisplay, que ambos
+    // deben coincidir en este orden): LSB primero deja bit0 en el indice 0,
+    // MSB primero lo manda al indice 3. hexDisplayState() en si sigue
+    // recibiendo bit0..bit3 en su orden logico de siempre -- solo cambia de
+    // que pin fisico se lee cada uno.
+    const bool msbFirst = components::hexDisplayIsMsbFirst(*instance);
+    const components::HexDisplayState state = components::hexDisplayState(
+        *instance, document_->pinValue(componentId_, msbFirst ? 3 : 0),
+        document_->pinValue(componentId_, msbFirst ? 2 : 1), document_->pinValue(componentId_, msbFirst ? 1 : 2),
+        document_->pinValue(componentId_, msbFirst ? 0 : 3));
     // Sin conectar (HighImpedance/Unknown, p. ej. mientras se arrastra en el
     // lienzo) se dibuja apagado, igual que un segmento individual de
     // io.seven_segment sin driver -- solo un conflicto real
@@ -1479,104 +1655,272 @@ void ComponentItem::paintHexDisplay(QPainter* painter, bool selected) {
 void ComponentItem::paintPlexer(QPainter* painter, bool selected) {
     const components::ComponentInstance* instance = document_->component(componentId_);
     const std::string& typeId = instance->typeId();
-    // "Uno a muchos" (decodificador/demultiplexor) vs "muchos a uno"
-    // (multiplexor/codificador de prioridad) - ver el comentario de
-    // MsiShapeKind en MsiShapes.hpp.
-    const bool fanOut = typeId == "plexers.decoder" || typeId == "plexers.demultiplexer";
-    const MsiShapeKind kind = fanOut ? MsiShapeKind::FanOutTrapezoid : MsiShapeKind::FanInTrapezoid;
+    const std::vector<components::PinTemplate>& pins = instance->pins();
+    // Rectangulo liso, no el trapecio fan-in/fan-out de ANSI/IEEE que tenia
+    // antes: el lado angosto del trapecio deja MENOS ancho real que el que
+    // usa bodyRect (narrowInset en MsiShapes.hpp es un 28% de la altura), y
+    // los rotulos de pin de ahi abajo se miden/posicionan para el ancho
+    // COMPLETO del bodyRect - contra ese lado angosto, el texto se salia
+    // del contorno visible (el defecto reportado). La sigla (DEC/MUX/
+    // DEMUX/PRI, ver mas abajo) mas la diferencia obvia en cantidad de
+    // pines entre los dos lados ya deja clara la direccion "uno a muchos"
+    // vs "muchos a uno" sin necesitar la forma trapezoidal.
     const QRectF bodyRect(3.0, 6.0, width_ - 6.0, height_ - 12.0);
 
     painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(20, 20, 20), selected ? 2.0 : 1.5));
     painter->setBrush(bodyFillColor(*instance, QColor(235, 235, 235)));
-    painter->drawPath(buildMsiShapePath(kind, bodyRect));
+    painter->drawPath(buildMsiShapePath(MsiShapeKind::Rectangle, bodyRect));
 
-    painter->setPen(QPen(QColor(20, 20, 20), 1.5));
-    for (std::size_t i = 0; i < instance->pins().size(); ++i) {
+    painter->setPen(QPen(QColor(0x8C, 0x8C, 0x8C), 1.5));
+    for (std::size_t i = 0; i < pins.size(); ++i) {
         const qreal y = pinLocalPositions_[i].y();
-        const bool isOutput = instance->pins()[i].direction == core::PinDirection::Output;
+        const bool isOutput = pins[i].direction == core::PinDirection::Output;
         painter->drawLine(QPointF(isOutput ? width_ : 0.0, y),
                            QPointF(isOutput ? bodyRect.right() : bodyRect.left(), y));
     }
 
-    painter->setPen(Qt::black);
-    painter->drawText(bodyRect, Qt::AlignCenter, QString::fromStdString(instance->definition().displayName));
+    // Nombre de cada pin, adentro del cuerpo (S0/D0/Y0/valid/etc. - antes
+    // solo se veian en el inspector). Ancho de columna medido de verdad,
+    // mismo criterio que paintMemory()/paintIc74ls().
+    QFont pinFont = painter->font();
+    pinFont.setPointSizeF(6.5);
+    painter->setFont(pinFont);
+    const QFontMetricsF pinFontMetrics(pinFont);
+    // Debe coincidir con el margen que asume plexerWidth en rebuildPins()
+    // (subido de 2 a 4 - se sentia apretado contra el borde del cuerpo).
+    constexpr qreal labelMargin = 4.0;
+    qreal leftLabelWidth = 0.0;
+    qreal rightLabelWidth = 0.0;
+    for (const components::PinTemplate& pin : pins) {
+        const qreal w = pinFontMetrics.horizontalAdvance(QString::fromStdString(pin.name));
+        if (pin.direction == core::PinDirection::Output) {
+            rightLabelWidth = std::max(rightLabelWidth, w);
+        } else {
+            leftLabelWidth = std::max(leftLabelWidth, w);
+        }
+    }
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(0x8C, 0x8C, 0x8C));
+    for (std::size_t i = 0; i < pins.size(); ++i) {
+        const qreal y = pinLocalPositions_[i].y();
+        const QString name = QString::fromStdString(pins[i].name);
+        if (pins[i].direction == core::PinDirection::Output) {
+            painter->drawText(QRectF(bodyRect.right() - labelMargin - rightLabelWidth, y - 7.0, rightLabelWidth, 14.0),
+                               Qt::AlignVCenter | Qt::AlignRight, name);
+        } else {
+            painter->drawText(QRectF(bodyRect.left() + labelMargin, y - 7.0, leftLabelWidth, 14.0),
+                               Qt::AlignVCenter | Qt::AlignLeft, name);
+        }
+    }
+
+    // Sigla corta (DEC/MUX/DEMUX/PRI) pegada arriba del cuerpo, en vez del
+    // displayName completo centrado - mismo criterio que paintMemory() (ver
+    // plexerCenterLabel() en MsiShapes.hpp), incluida la posicion fija
+    // arriba en vez de perseguir un hueco entre pines.
+    const QString centerLabel = plexerCenterLabel(typeId);
+    QFont centerFont = painter->font();
+    centerFont.setBold(true);
+    centerFont.setPointSizeF(centerLabel.isEmpty() ? 7.0 : 7.5);
+    const QFontMetricsF centerFontMetrics(centerFont);
+    const qreal centerLabelY = bodyRect.top() + centerFontMetrics.capHeight() / 2.0 + 4.0;
+    painter->setFont(centerFont);
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(0x8C, 0x8C, 0x8C));
+    const QRectF centerRect(bodyRect.left(), centerLabelY - 8.0, bodyRect.width(), 16.0);
+    painter->drawText(centerRect, Qt::AlignCenter,
+                       centerLabel.isEmpty() ? QString::fromStdString(instance->definition().displayName)
+                                              : centerLabel);
 }
 
 void ComponentItem::paintArithmetic(QPainter* painter, bool selected) {
     const components::ComponentInstance* instance = document_->component(componentId_);
     const std::string& typeId = instance->typeId();
+    const std::vector<components::PinTemplate>& pins = instance->pins();
     const QRectF bodyRect(3.0, 6.0, width_ - 6.0, height_ - 12.0);
 
     painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(20, 20, 20), selected ? 2.0 : 1.5));
     painter->setBrush(bodyFillColor(*instance, QColor(235, 235, 235)));
     painter->drawPath(buildMsiShapePath(MsiShapeKind::Rectangle, bodyRect));
 
-    painter->setPen(QPen(QColor(20, 20, 20), 1.5));
-    for (std::size_t i = 0; i < instance->pins().size(); ++i) {
+    painter->setPen(QPen(QColor(0x8C, 0x8C, 0x8C), 1.5));
+    for (std::size_t i = 0; i < pins.size(); ++i) {
         const qreal y = pinLocalPositions_[i].y();
-        const bool isOutput = instance->pins()[i].direction == core::PinDirection::Output;
+        const bool isOutput = pins[i].direction == core::PinDirection::Output;
         painter->drawLine(QPointF(isOutput ? width_ : 0.0, y),
                            QPointF(isOutput ? bodyRect.right() : bodyRect.left(), y));
     }
 
-    // Glifo vectorial chico (sin drawText - queda reservado para el nombre
-    // centrado abajo): "+" sumador, "-" restador, "=" comparador.
-    const QPointF glyphCenter(bodyRect.center().x(), bodyRect.top() + bodyRect.height() * 0.22);
-    const qreal glyphHalf = std::min(bodyRect.width(), bodyRect.height()) * 0.14;
-    painter->setPen(QPen(QColor(20, 20, 20), 1.6));
-    if (typeId == "arithmetic.adder") {
-        painter->drawLine(QPointF(glyphCenter.x() - glyphHalf, glyphCenter.y()),
-                           QPointF(glyphCenter.x() + glyphHalf, glyphCenter.y()));
-        painter->drawLine(QPointF(glyphCenter.x(), glyphCenter.y() - glyphHalf),
-                           QPointF(glyphCenter.x(), glyphCenter.y() + glyphHalf));
-    } else if (typeId == "arithmetic.subtractor") {
-        painter->drawLine(QPointF(glyphCenter.x() - glyphHalf, glyphCenter.y()),
-                           QPointF(glyphCenter.x() + glyphHalf, glyphCenter.y()));
-    } else { // arithmetic.comparator
-        painter->drawLine(QPointF(glyphCenter.x() - glyphHalf, glyphCenter.y() - glyphHalf * 0.5),
-                           QPointF(glyphCenter.x() + glyphHalf, glyphCenter.y() - glyphHalf * 0.5));
-        painter->drawLine(QPointF(glyphCenter.x() - glyphHalf, glyphCenter.y() + glyphHalf * 0.5),
-                           QPointF(glyphCenter.x() + glyphHalf, glyphCenter.y() + glyphHalf * 0.5));
+    // Nombre de cada pin (A0/B0/Cin/Sum0/Cout/GT/EQ/LT/etc. - antes solo se
+    // veian en el inspector). Ancho de columna medido de verdad, mismo
+    // criterio que paintPlexer()/paintMemory().
+    QFont pinFont = painter->font();
+    pinFont.setPointSizeF(6.5);
+    painter->setFont(pinFont);
+    const QFontMetricsF pinFontMetrics(pinFont);
+    // Debe coincidir con el margen que asume arithmeticWidth en
+    // rebuildPins().
+    constexpr qreal labelMargin = 4.0;
+    qreal leftLabelWidth = 0.0;
+    qreal rightLabelWidth = 0.0;
+    for (const components::PinTemplate& pin : pins) {
+        const qreal w = pinFontMetrics.horizontalAdvance(QString::fromStdString(pin.name));
+        if (pin.direction == core::PinDirection::Output) {
+            rightLabelWidth = std::max(rightLabelWidth, w);
+        } else {
+            leftLabelWidth = std::max(leftLabelWidth, w);
+        }
+    }
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(0x8C, 0x8C, 0x8C));
+    for (std::size_t i = 0; i < pins.size(); ++i) {
+        const qreal y = pinLocalPositions_[i].y();
+        const QString name = QString::fromStdString(pins[i].name);
+        if (pins[i].direction == core::PinDirection::Output) {
+            painter->drawText(QRectF(bodyRect.right() - labelMargin - rightLabelWidth, y - 7.0, rightLabelWidth, 14.0),
+                               Qt::AlignVCenter | Qt::AlignRight, name);
+        } else {
+            painter->drawText(QRectF(bodyRect.left() + labelMargin, y - 7.0, leftLabelWidth, 14.0),
+                               Qt::AlignVCenter | Qt::AlignLeft, name);
+        }
     }
 
-    painter->setPen(Qt::black);
-    painter->drawText(bodyRect, Qt::AlignCenter, QString::fromStdString(instance->definition().displayName));
+    // Sigla corta (ADD/SUB/CMP) pegada arriba del cuerpo, en vez del
+    // displayName completo centrado - mismo criterio que paintPlexer()/
+    // paintMemory() (ver arithmeticCenterLabel() en MsiShapes.hpp): con las
+    // columnas de rotulos de pin ahora ocupando los costados, el nombre
+    // completo ("Restador") ya no entra.
+    const QString centerLabel = arithmeticCenterLabel(typeId);
+    QFont centerFont = painter->font();
+    centerFont.setBold(true);
+    centerFont.setPointSizeF(centerLabel.isEmpty() ? 7.0 : 7.5);
+    const QFontMetricsF centerFontMetrics(centerFont);
+    const qreal centerLabelY = bodyRect.top() + centerFontMetrics.capHeight() / 2.0 + 4.0;
+    painter->setFont(centerFont);
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(0x8C, 0x8C, 0x8C));
+    const QRectF centerRect(bodyRect.left(), centerLabelY - 8.0, bodyRect.width(), 16.0);
+    painter->drawText(centerRect, Qt::AlignCenter,
+                       centerLabel.isEmpty() ? QString::fromStdString(instance->definition().displayName)
+                                              : centerLabel);
 }
 
 void ComponentItem::paintMemory(QPainter* painter, bool selected) {
     const components::ComponentInstance* instance = document_->component(componentId_);
     const std::string& typeId = instance->typeId();
-    const QRectF bodyRect(3.0, 6.0, width_ - 6.0, height_ - 12.0);
+    const std::vector<components::PinTemplate>& pins = instance->pins();
+
+    // Burbuja de negacion sobre Q' (siempre que el tipo tenga ese pin exacto
+    // - D/JK/T/SR lo tienen, memory.register no) y sobre PRE/CLR cuando la
+    // instancia los tiene Y su polaridad es "activeLow" (memory.srLatch/
+    // register no tienen esa propiedad - findProperty() da null y se evita
+    // el std::get). Reserva su propio margen de cuerpo, igual criterio que
+    // la burbuja de salida de paintGate().
+    constexpr qreal bubbleDiameter = 7.0;
+    const bool hasQnBubble = findPinIndexByName(pins, "Q'").has_value();
+    bool hasPreClrBubble = false;
+    if (findPinIndexByName(pins, "PRE").has_value() &&
+        instance->definition().findProperty("presetClearPolarity") != nullptr) {
+        hasPreClrBubble = std::get<std::string>(instance->property("presetClearPolarity")) == "activeLow";
+    }
+    const qreal rightMargin = 3.0 + (hasQnBubble ? bubbleDiameter + 3.0 : 0.0);
+    const qreal leftMargin = 3.0 + (hasPreClrBubble ? bubbleDiameter + 3.0 : 0.0);
+    const QRectF bodyRect(leftMargin, 6.0, width_ - leftMargin - rightMargin, height_ - 12.0);
 
     painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(20, 20, 20), selected ? 2.0 : 1.5));
     painter->setBrush(bodyFillColor(*instance, QColor(235, 235, 235)));
     painter->drawPath(buildMsiShapePath(MsiShapeKind::Rectangle, bodyRect));
 
-    painter->setPen(QPen(QColor(20, 20, 20), 1.5));
-    for (std::size_t i = 0; i < instance->pins().size(); ++i) {
+    for (std::size_t i = 0; i < pins.size(); ++i) {
         const qreal y = pinLocalPositions_[i].y();
-        const bool isOutput = instance->pins()[i].direction == core::PinDirection::Output;
-        painter->drawLine(QPointF(isOutput ? width_ : 0.0, y),
-                           QPointF(isOutput ? bodyRect.right() : bodyRect.left(), y));
+        const bool isOutput = pins[i].direction == core::PinDirection::Output;
+        qreal stubStart = isOutput ? bodyRect.right() : bodyRect.left();
+        const bool needsBubble =
+            (hasQnBubble && pins[i].name == "Q'") || (hasPreClrBubble && (pins[i].name == "PRE" || pins[i].name == "CLR"));
+        if (needsBubble) {
+            const qreal bubbleCenterX = isOutput ? bodyRect.right() + bubbleDiameter / 2.0 + 1.0
+                                                  : bodyRect.left() - bubbleDiameter / 2.0 - 1.0;
+            painter->setPen(QPen(selected ? QColor(30, 90, 220) : QColor(15, 15, 15), 2.0));
+            painter->setBrush(QColor(245, 245, 245));
+            painter->drawEllipse(QPointF(bubbleCenterX, y), bubbleDiameter / 2.0, bubbleDiameter / 2.0);
+            stubStart = isOutput ? bubbleCenterX + bubbleDiameter / 2.0 : bubbleCenterX - bubbleDiameter / 2.0;
+        }
+        // Gris claro (no negro): el cuerpo por defecto de memory.* ahora es
+        // oscuro (#2C2D2E, ver makeBodyColorProperty() en
+        // BasicComponentLibrary.cpp), asi que una linea casi negra se perdia
+        // contra el - mismo criterio que ya usa paintIc74ls() para sus
+        // lineas de pin reales sobre un cuerpo igual de oscuro.
+        painter->setPen(QPen(QColor(0x8C, 0x8C, 0x8C), 1.5));
+        painter->drawLine(QPointF(stubStart, y), QPointF(isOutput ? width_ : 0.0, y));
     }
 
     // Muesca de reloj: solo los tipos disparados por flanco (no el latch SR,
     // que es de nivel) - ver el comentario de buildClockTrianglePath.
-    const bool edgeTriggered =
-        typeId == "memory.dFlipFlop" || typeId == "memory.jkFlipFlop" || typeId == "memory.register";
+    const bool edgeTriggered = typeId == "memory.dFlipFlop" || typeId == "memory.jkFlipFlop" ||
+                                typeId == "memory.tFlipFlop" || typeId == "memory.register";
     if (edgeTriggered) {
-        for (std::size_t i = 0; i < instance->pins().size(); ++i) {
-            if (instance->pins()[i].name == "CLK") {
+        for (std::size_t i = 0; i < pins.size(); ++i) {
+            if (pins[i].name == "CLK") {
                 painter->setPen(Qt::NoPen);
-                painter->setBrush(QColor(20, 20, 20));
+                painter->setBrush(QColor(0x8C, 0x8C, 0x8C));
                 painter->drawPath(buildClockTrianglePath(bodyRect, pinLocalPositions_[i].y(), 6.0));
                 break;
             }
         }
     }
 
-    painter->setPen(Qt::black);
-    painter->drawText(bodyRect, Qt::AlignCenter, QString::fromStdString(instance->definition().displayName));
+    // Nombre de cada pin, adentro del cuerpo (D/CLK/Q/Q'/etc. - antes solo
+    // se veian en el inspector). Ancho de columna medido de verdad, mismo
+    // criterio que paintIc74ls(); el pin CLK se corre un poco a la derecha
+    // para no pisar la muesca de reloj de arriba.
+    QFont pinFont = painter->font();
+    pinFont.setPointSizeF(6.5);
+    painter->setFont(pinFont);
+    const QFontMetricsF pinFontMetrics(pinFont);
+    constexpr qreal labelMargin = 2.0;
+    qreal leftLabelWidth = 0.0;
+    qreal rightLabelWidth = 0.0;
+    for (const components::PinTemplate& pin : pins) {
+        const qreal w = pinFontMetrics.horizontalAdvance(QString::fromStdString(pin.name));
+        if (pin.direction == core::PinDirection::Output) {
+            rightLabelWidth = std::max(rightLabelWidth, w);
+        } else {
+            leftLabelWidth = std::max(leftLabelWidth, w);
+        }
+    }
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(0x8C, 0x8C, 0x8C));
+    for (std::size_t i = 0; i < pins.size(); ++i) {
+        const qreal y = pinLocalPositions_[i].y();
+        const QString name = QString::fromStdString(pins[i].name);
+        if (pins[i].direction == core::PinDirection::Output) {
+            painter->drawText(QRectF(bodyRect.right() - labelMargin - rightLabelWidth, y - 7.0, rightLabelWidth, 14.0),
+                               Qt::AlignVCenter | Qt::AlignRight, name);
+        } else {
+            const qreal clkOffset = (edgeTriggered && pins[i].name == "CLK") ? 8.0 : 0.0;
+            painter->drawText(QRectF(bodyRect.left() + labelMargin + clkOffset, y - 7.0, leftLabelWidth, 14.0),
+                               Qt::AlignVCenter | Qt::AlignLeft, name);
+        }
+    }
+
+    // Sigla corta (D/JK/T/SR/REG) en vez del displayName completo ("Flip-Flop
+    // D" no entraba en el cuerpo angosto) - ver memoryCenterLabel(). Cae de
+    // vuelta al displayName para cualquier memory.* futuro que esa funcion
+    // todavia no reconozca.
+    //
+    // Pegada arriba, no centrada en el cuerpo (a pedido explicito, y es
+    // ademas el criterio que ya se ve en la referencia de Proteus que se
+    // uso de guia): un margen fijo chico debajo del borde superior, en vez
+    // de perseguir el hueco entre filas de pin - mas simple y predecible,
+    // y de paso evita la colision que tenia antes contra un pin del medio
+    // (p. ej. "K" en el flip-flop JK) al buscar el centro geometrico.
+    const QString centerLabel = memoryCenterLabel(typeId);
+    QFont centerFont = painter->font();
+    centerFont.setBold(true);
+    centerFont.setPointSizeF(centerLabel.isEmpty() ? 7.0 : 7.5);
+    const QFontMetricsF centerFontMetrics(centerFont);
+    const qreal centerLabelY = bodyRect.top() + centerFontMetrics.capHeight() / 2.0 + 4.0;
+
+    painter->setFont(centerFont);
+    painter->setPen(selected ? QColor(30, 90, 220) : QColor(0x8C, 0x8C, 0x8C));
+    const QRectF centerRect(bodyRect.left(), centerLabelY - 8.0, bodyRect.width(), 16.0);
+    painter->drawText(centerRect, Qt::AlignCenter,
+                       centerLabel.isEmpty() ? QString::fromStdString(instance->definition().displayName)
+                                              : centerLabel);
 }
 
 void ComponentItem::paintSubcircuit(QPainter* painter, bool selected) {

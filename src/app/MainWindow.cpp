@@ -4,6 +4,8 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDockWidget>
 #include <QEvent>
@@ -27,6 +29,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QSignalBlocker>
+#include <QStackedWidget>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyleHints>
@@ -46,11 +49,17 @@
 #include "editor/CircuitScene.hpp"
 #include "editor/CircuitView.hpp"
 #include "editor/ComponentItem.hpp"
+#include "editor/ExcitationTableDocument.hpp"
+#include "editor/KarnaughDocument.hpp"
+#include "editor/LogicColors.hpp"
 #include "editor/Project.hpp"
+#include "editor/TruthTableDocument.hpp"
 #include "formats/ProjectSerializer.hpp"
 #include "ui/AutoHideStrip.hpp"
 #include "ui/ComponentPalette.hpp"
+#include "ui/ExcitationTableView.hpp"
 #include "ui/IconFactory.hpp"
+#include "ui/KarnaughMapView.hpp"
 #include "ui/MiniMapView.hpp"
 #include "ui/PreferencesDialog.hpp"
 #include "ui/ProjectTree.hpp"
@@ -58,6 +67,7 @@
 #include "ui/SimulationToolbar.hpp"
 #include "ui/Theme.hpp"
 #include "ui/TruthTablePanel.hpp"
+#include "ui/TruthTableView.hpp"
 #include "ui/WaveformPanel.hpp"
 #include "ui/ZoomControl.hpp"
 
@@ -216,6 +226,29 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), project_(std::mak
     connect(project_.get(), &editor::Project::documentAboutToBeRemoved, this, &MainWindow::onDocumentAboutToBeRemoved);
     connect(project_.get(), &editor::Project::activeDocumentChanged, this, &MainWindow::onActiveDocumentChanged);
     connect(project_.get(), &editor::Project::documentRenamed, this, &MainWindow::onDocumentRenamed);
+    // Mirror de las cuatro de arriba, para karnaughViews_ - a diferencia
+    // del documento anonimo inicial (un CircuitDocument, sincronizado a
+    // mano dos lineas mas abajo porque Project ya lo creo en su propio
+    // constructor antes de que estas conexiones existieran), un proyecto
+    // recien construido nunca tiene ningun mapa de Karnaugh todavia, asi
+    // que no hace falta un sincronizado equivalente aca.
+    connect(project_.get(), &editor::Project::karnaughDocumentAdded, this, &MainWindow::onKarnaughDocumentAdded);
+    connect(project_.get(), &editor::Project::karnaughDocumentAboutToBeRemoved, this,
+            &MainWindow::onKarnaughDocumentAboutToBeRemoved);
+    connect(project_.get(), &editor::Project::karnaughDocumentRenamed, this, &MainWindow::onKarnaughDocumentRenamed);
+    // Mirror de las tres de arriba, para truthTableViews_.
+    connect(project_.get(), &editor::Project::truthTableDocumentAdded, this, &MainWindow::onTruthTableDocumentAdded);
+    connect(project_.get(), &editor::Project::truthTableDocumentAboutToBeRemoved, this,
+            &MainWindow::onTruthTableDocumentAboutToBeRemoved);
+    connect(project_.get(), &editor::Project::truthTableDocumentRenamed, this,
+            &MainWindow::onTruthTableDocumentRenamed);
+    // Mirror de las tres de arriba, para excitationTableViews_.
+    connect(project_.get(), &editor::Project::excitationTableDocumentAdded, this,
+            &MainWindow::onExcitationTableDocumentAdded);
+    connect(project_.get(), &editor::Project::excitationTableDocumentAboutToBeRemoved, this,
+            &MainWindow::onExcitationTableDocumentAboutToBeRemoved);
+    connect(project_.get(), &editor::Project::excitationTableDocumentRenamed, this,
+            &MainWindow::onExcitationTableDocumentRenamed);
     // El documento anonimo inicial se creo dentro del constructor de Project,
     // antes de que las conexiones de arriba existieran - se sincroniza a mano
     // aca para que scenes_ tenga una entrada para el desde el principio.
@@ -294,12 +327,19 @@ void MainWindow::setupCentralWidgets() {
 
     view_ = new CircuitView(activeScene(), this);
 
+    // Pila entre pestanas de circuito (view_, pagina 0, siempre presente) y
+    // las de mapa de Karnaugh (una pagina de ui::KarnaughMapView por
+    // documento abierto, ver karnaughViews_) - onDocumentTabChanged()
+    // decide cual mostrar segun editor::Project::documentKind().
+    centralStack_ = new QStackedWidget(this);
+    centralStack_->addWidget(view_);
+
     auto* container = new QWidget(this);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     layout->addWidget(documentTabBar_);
-    layout->addWidget(view_);
+    layout->addWidget(centralStack_);
     setCentralWidget(container);
 
     // El documento anonimo inicial (agregado via onDocumentAdded() en el
@@ -317,6 +357,12 @@ void MainWindow::setupDocks() {
     setupAutoHideStrips();
 
     projectTree_ = new ui::ProjectTree(project_.get(), this);
+    connect(projectTree_, &ui::ProjectTree::karnaughDocumentActivationRequested, this,
+            &MainWindow::onKarnaughDocumentActivationRequested);
+    connect(projectTree_, &ui::ProjectTree::truthTableDocumentActivationRequested, this,
+            &MainWindow::onTruthTableDocumentActivationRequested);
+    connect(projectTree_, &ui::ProjectTree::excitationTableDocumentActivationRequested, this,
+            &MainWindow::onExcitationTableDocumentActivationRequested);
     auto* projectTreeDock = new QDockWidget(tr("Proyecto"), this);
     projectTreeDock->setObjectName("projectTreeDock");
     projectTreeDock->setWidget(projectTree_);
@@ -356,26 +402,34 @@ void MainWindow::setupDocks() {
     // que lo vaya a sincronizar solo; se hace una vez aca, a mano.
     miniMap_->setTarget(activeScene(), view_);
 
+    // inspector_ ya no vive en un dock anclado: se abre a demanda dentro de
+    // propertiesDialog_ (dialogo modal, ver openPropertiesDialog()), disparado
+    // por doble clic sobre un componente o por "Propiedades" del menu
+    // contextual - nunca se agrega a esta ventana con addDockWidget().
     inspector_ = new ui::PropertyInspector(project_->activeDocument(), project_->activeUndoStack(), this);
-    inspectorDock_ = new QDockWidget(tr("Propiedades"), this);
-    inspectorDock_->setObjectName("inspectorDock");
-    inspectorDock_->setWidget(inspector_);
-    inspectorDock_->setTitleBarWidget(new DockTitleBar(inspectorDock_));
-    addDockWidget(Qt::RightDockWidgetArea, inspectorDock_);
+    propertiesDialog_ = new QDialog(this);
+    propertiesDialog_->setObjectName("propertiesDialog");
+    propertiesDialog_->setWindowTitle(tr("Propiedades"));
+    propertiesDialog_->setModal(true);
+    auto* propertiesLayout = new QVBoxLayout(propertiesDialog_);
+    propertiesLayout->addWidget(inspector_);
+    auto* propertiesButtons = new QDialogButtonBox(QDialogButtonBox::Close, propertiesDialog_);
+    connect(propertiesButtons, &QDialogButtonBox::rejected, propertiesDialog_, &QDialog::close);
+    propertiesLayout->addWidget(propertiesButtons);
 
-    truthTablePanel_ = new ui::TruthTablePanel(project_->activeDocument(), this);
+    truthTablePanel_ = new ui::TruthTablePanel(project_.get(), project_->activeDocument(), this);
     truthTableDock_ = new QDockWidget(tr("Tabla de verdad"), this);
     truthTableDock_->setObjectName("truthTableDock");
     truthTableDock_->setWidget(truthTablePanel_);
     truthTableDock_->setTitleBarWidget(new DockTitleBar(truthTableDock_));
-    tabifyDockWidget(inspectorDock_, truthTableDock_);
+    addDockWidget(Qt::RightDockWidgetArea, truthTableDock_);
 
     waveformPanel_ = new ui::WaveformPanel(project_->activeDocument(), this);
     waveformDock_ = new QDockWidget(tr("Analizador de senales"), this);
     waveformDock_->setObjectName("waveformDock");
     waveformDock_->setWidget(waveformPanel_);
     waveformDock_->setTitleBarWidget(new DockTitleBar(waveformDock_));
-    tabifyDockWidget(inspectorDock_, waveformDock_);
+    tabifyDockWidget(truthTableDock_, waveformDock_);
     // Visibles de entrada, igual que projectTreeDock/paletteDock del lado
     // izquierdo - el unico control de visibilidad es el pin de auto-hide de
     // cada uno (ver DockTitleBar/makeAutoHideable), sin ningun boton grupal
@@ -388,9 +442,8 @@ void MainWindow::setupDocks() {
 
     makeAutoHideable(projectTreeDock, Qt::LeftDockWidgetArea, paletteDock);
     makeAutoHideable(paletteDock, Qt::LeftDockWidgetArea, projectTreeDock);
-    makeAutoHideable(inspectorDock_, Qt::RightDockWidgetArea, truthTableDock_);
-    makeAutoHideable(truthTableDock_, Qt::RightDockWidgetArea, inspectorDock_);
-    makeAutoHideable(waveformDock_, Qt::RightDockWidgetArea, inspectorDock_);
+    makeAutoHideable(truthTableDock_, Qt::RightDockWidgetArea, waveformDock_);
+    makeAutoHideable(waveformDock_, Qt::RightDockWidgetArea, truthTableDock_);
 
     // El auto-hide guardado ya no se aplica aca sino en restoreWindowLayout(),
     // que corre una vez creadas tambien las barras de herramientas: hay que
@@ -473,10 +526,31 @@ void MainWindow::applyDefaultWindowGeometry() {
 void MainWindow::restoreWindowLayout() {
     // Disposicion de la sesion anterior; si no hay ninguna guardada o el blob
     // es ilegible (formato viejo, instalacion nueva), la de fabrica.
-    const QByteArray savedState = QSettings().value("MainWindow/state").toByteArray();
+    //
+    // Nunca se auto-oculta ningun panel a partir de un "MainWindow/state"
+    // restaurado (solo en la disposicion de fabrica, mas abajo). v0.1.2 y
+    // v0.1.3 intentaron primero comparar una huella de docks/toolbars y
+    // despues tambien la version exacta que guardo el estado antes de confiar
+    // en el, pero un caso real (mismo binario, mismo instalador, huella Y
+    // version identicas) igual reprodujo el mismo crash "aparece el splash y
+    // se cierra": restoreState() puede devolver true con un blob asi (no
+    // valida tan estricto), pero el primer removeDockWidget() posterior
+    // (auto-hide) encuentra el QDockAreaLayout interno de Qt en un estado que
+    // a veces esta corrupto y a veces no, por una razon que no depende solo
+    // de version/huella (probablemente la geometria exacta capturada en la
+    // sesion que guardo el blob). No hay forma fiable de detectar por
+    // adelantado si un blob puntual es seguro, asi que se elimina la unica
+    // operacion que alguna vez crasheo (auto-ocultar un panel restaurado) en
+    // vez de seguir intentando adivinar cuando es seguro hacerlo. El tamano
+    // y posicion de ventana (restoreGeometry(), en el constructor) y el
+    // resto del estado de docks/toolbars siguen restaurandose normalmente -
+    // solo el auto-hide de sesiones anteriores queda sin restaurar; el
+    // usuario puede volver a auto-ocultar sus paneles con un click.
+    const QSettings settings;
+    const QByteArray savedState = settings.value("MainWindow/state").toByteArray();
     QStringList autoHiddenNames;
     if (!savedState.isEmpty() && restoreState(savedState)) {
-        autoHiddenNames = QSettings().value("MainWindow/autoHiddenDocks").toStringList();
+        autoHiddenNames.clear();
     } else {
         const QByteArray defaultState = defaults::windowState();
         if (!defaultState.isEmpty()) {
@@ -791,6 +865,7 @@ void MainWindow::setupMenusAndToolbars() {
 
     // --- Editar ---
     QMenu* editMenu = menuBar()->addMenu(tr("&Editar"));
+    editMenu_ = editMenu; // ver setCircuitEditingEnabled()
     // Las acciones de un QUndoGroup siguen automaticamente al QUndoStack
     // activo (project_->undoGroup().setActiveStack(), ver
     // onActiveDocumentChanged) - no hace falta reconstruirlas al cambiar de
@@ -808,7 +883,7 @@ void MainWindow::setupMenusAndToolbars() {
     editMenu->addAction(icons::deleteItem(), tr("&Eliminar"), this, [this] { activeScene()->deleteSelected(); })
         ->setShortcut(QKeySequence::Delete);
     editMenu->addAction(icons::rotate(), tr("&Rotar"), this, [this] { activeScene()->rotateSelected(); })
-        ->setShortcut(QStringLiteral("R"));
+        ->setShortcuts({QKeySequence(QStringLiteral("R")), QKeySequence(Qt::CTRL | Qt::Key_R)});
     editMenu->addSeparator();
     editMenu->addAction(tr("Cop&iar"), this, [this] { activeScene()->copySelected(); })->setShortcut(QKeySequence::Copy);
     editMenu->addAction(tr("Cor&tar"), this, [this] { activeScene()->cutSelected(); })->setShortcut(QKeySequence::Cut);
@@ -824,7 +899,107 @@ void MainWindow::setupMenusAndToolbars() {
     simMenu->addAction(icons::step(), tr("Paso a &paso"), this, [this] { project_->activeDocument()->step(); })
         ->setShortcut(QKeySequence(Qt::Key_F6));
     simMenu->addAction(icons::reset(), tr("Re&iniciar"), this, [this] { project_->activeDocument()->rebuildSimulation(); })
-        ->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_R));
+        ->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
+
+    // --- Karnaugh --- (mapas de Karnaugh y tablas de verdad multi-salida:
+    // las dos formas de sintetizar un circuito a partir de una funcion
+    // booleana, en vez de dibujarlo compuerta por compuerta a mano)
+    QMenu* karnaughMenu = menuBar()->addMenu(tr("&Karnaugh"));
+    karnaughMenu->addAction(tr("Nuevo mapa de &Karnaugh..."), this,
+                             [this] { projectTree_->addNewKarnaughDocument(); });
+    karnaughMenu->addAction(tr("Nueva &tabla de verdad..."), this,
+                             [this] { projectTree_->addNewTruthTableDocument(); });
+    karnaughMenu->addAction(tr("Nueva tabla de e&xcitacion..."), this,
+                             [this] { projectTree_->addNewExcitationTableDocument(); });
+    karnaughMenu->addSeparator();
+    // Solo tiene sentido con una tabla de verdad o de excitacion al frente
+    // (un mapa de Karnaugh YA ES un unico mapa) -- arma un mapa aparte por
+    // cada columna de salida (o de excitacion), para inspeccionar/animar el
+    // procedimiento de cada una antes de generar el circuito combinado.
+    karnaughMenu->addAction(tr("Generar &mapas"), this, [this] {
+        const int index = documentTabBar_ != nullptr ? documentTabBar_->currentIndex() : -1;
+        if (index < 0) {
+            return;
+        }
+        const uint32_t id = documentTabBar_->tabData(index).toUInt();
+        try {
+            switch (project_->documentKind(id)) {
+                case editor::Project::DocumentKind::TruthTable:
+                    truthTableViews_.at(id)->onGenerateMapsClicked();
+                    break;
+                case editor::Project::DocumentKind::ExcitationTable:
+                    excitationTableViews_.at(id)->onGenerateMapsClicked();
+                    break;
+                case editor::Project::DocumentKind::Karnaugh:
+                case editor::Project::DocumentKind::Circuit:
+                    QMessageBox::information(
+                        this, tr("Generar mapas"),
+                        tr("Esta accion arma un mapa de Karnaugh por columna de salida (o de excitacion) -- abra o "
+                           "cree una tabla de verdad o de excitacion primero."));
+                    break;
+            }
+        } catch (const std::exception&) {
+        }
+    });
+    // Dispara la generacion sin necesitar el boton propio de la vista -- solo
+    // tiene efecto con un mapa de Karnaugh o una tabla de verdad al frente;
+    // en cualquier otro caso avisa en vez de no hacer nada en silencio.
+    karnaughMenu->addAction(tr("&Generar circuito"), this, [this] {
+        const int index = documentTabBar_ != nullptr ? documentTabBar_->currentIndex() : -1;
+        if (index < 0) {
+            return;
+        }
+        const uint32_t id = documentTabBar_->tabData(index).toUInt();
+        // documentKind() lanza para un id desconocido -- en teoria el id de
+        // la pestana activa siempre deberia ser valido, pero esta accion es
+        // la unica que lo consulta bajo demanda (afuera de la cascada de
+        // senales de Project) en vez de recibirlo ya validado de un
+        // xxxAdded/xxxActivationRequested, asi que se prefiere avisar en vez
+        // de arriesgar un crash si algun caso limite lo deja transitoriamente
+        // desincronizado.
+        try {
+            switch (project_->documentKind(id)) {
+                case editor::Project::DocumentKind::Karnaugh:
+                    karnaughViews_.at(id)->onGenerateCircuitClicked();
+                    return;
+                case editor::Project::DocumentKind::TruthTable:
+                    truthTableViews_.at(id)->onGenerateCircuitClicked();
+                    return;
+                case editor::Project::DocumentKind::ExcitationTable:
+                    excitationTableViews_.at(id)->onGenerateCircuitClicked();
+                    return;
+                case editor::Project::DocumentKind::Circuit:
+                    QMessageBox::information(
+                        this, tr("Generar circuito"),
+                        tr("Esta accion sintetiza un circuito a partir de un mapa de Karnaugh, una tabla de verdad "
+                           "o una tabla de excitacion -- abra o cree uno primero."));
+                    return;
+            }
+        } catch (const std::exception&) {
+            // Pestana en un estado transitorio (p. ej. a mitad de cerrarse) --
+            // sin efecto, en vez de crashear la aplicacion entera.
+        }
+    });
+    // Solo tiene efecto con una tabla de excitacion al frente: coloca
+    // flip-flops de verdad, no solo su logica -- ver
+    // ui::ExcitationTableView::onGenerateCircuitWithFlipFlopsClicked().
+    karnaughMenu->addAction(tr("Generar circuito con &flip-flops"), this, [this] {
+        const int index = documentTabBar_ != nullptr ? documentTabBar_->currentIndex() : -1;
+        if (index < 0) {
+            return;
+        }
+        const uint32_t id = documentTabBar_->tabData(index).toUInt();
+        try {
+            if (project_->documentKind(id) == editor::Project::DocumentKind::ExcitationTable) {
+                excitationTableViews_.at(id)->onGenerateCircuitWithFlipFlopsClicked();
+            } else {
+                QMessageBox::information(this, tr("Generar circuito con flip-flops"),
+                                          tr("Esta accion coloca un flip-flop de verdad por bit -- abra o cree una "
+                                             "tabla de excitacion primero."));
+            }
+        } catch (const std::exception&) {
+        }
+    });
 
     // --- Ver ---
     QMenu* viewMenu = menuBar()->addMenu(tr("&Ver"));
@@ -942,10 +1117,7 @@ void MainWindow::onComponentContextMenuRequested(uint32_t componentId, QPoint sc
     // "desplegar menu al dar clic derecho... opciones de rotacion").
     QMenu menu(this);
     QAction* propertiesAction = menu.addAction(tr("Propiedades"));
-    connect(propertiesAction, &QAction::triggered, this, [this, componentId] {
-        inspector_->setSelectedComponents({componentId});
-        revealDock(inspectorDock_);
-    });
+    connect(propertiesAction, &QAction::triggered, this, [this, componentId] { openPropertiesDialog(componentId); });
     menu.addSeparator();
     // Sin setShortcut() aca a proposito: ya existen los mismos atajos
     // globales (R/Supr, ver el menu Editar arriba y
@@ -973,6 +1145,51 @@ void MainWindow::onComponentContextMenuRequested(uint32_t componentId, QPoint sc
     connect(sendToBackAction, &QAction::triggered, this, [this] { activeScene()->sendSelectedToBack(); });
 
     menu.exec(screenPos);
+}
+
+void MainWindow::onComponentDoubleClicked(uint32_t componentId) { openPropertiesDialog(componentId); }
+
+void MainWindow::openPropertiesDialog(uint32_t componentId) {
+    inspector_->setSelectedComponents({componentId});
+    propertiesDialog_->exec();
+}
+
+QString MainWindow::describeWireEndpoint(const editor::WireEndpoint& endpoint) const {
+    if (endpoint.isJunction) {
+        return tr("Punto de union #%1").arg(endpoint.id);
+    }
+    const components::ComponentInstance* instance = project_->activeDocument()->component(endpoint.id);
+    if (instance == nullptr) {
+        return tr("(componente eliminado)");
+    }
+    const std::string& label = std::get<std::string>(instance->property("label"));
+    const QString name =
+        label.empty() ? QString::fromStdString(instance->typeId()) : QString::fromStdString(label);
+    QString pinName;
+    if (endpoint.pinIndex < instance->pins().size()) {
+        pinName = QString::fromStdString(instance->pins()[endpoint.pinIndex].name).trimmed();
+    }
+    return pinName.isEmpty() ? name : tr("%1 (pin %2)").arg(name, pinName);
+}
+
+void MainWindow::onJunctionDoubleClicked(uint32_t junctionId) {
+    editor::CircuitDocument* document = project_->activeDocument();
+    const QPointF pos = document->junctionPosition(junctionId);
+    const core::LogicValue value = document->endpointValue(editor::WireEndpoint::junction(junctionId));
+    const std::vector<editor::WireConnection> wires = document->wiresAttachedToJunction(junctionId);
+
+    QStringList lines;
+    lines << tr("Posicion: (%1, %2)").arg(pos.x()).arg(pos.y());
+    lines << tr("Valor logico: %1").arg(editor::logicValueGlyph(value));
+    lines << QString();
+    lines << tr("Conexiones (%1):").arg(wires.size());
+    for (const editor::WireConnection& wire : wires) {
+        const editor::WireEndpoint other =
+            (wire.a.isJunction && wire.a.id == junctionId) ? wire.b : wire.a;
+        lines << QStringLiteral("  • ") + describeWireEndpoint(other);
+    }
+
+    QMessageBox::information(this, tr("Punto de union"), lines.join(QStringLiteral("\n")));
 }
 
 void MainWindow::onNewProject() {
@@ -1014,6 +1231,38 @@ QString MainWindow::promptForNewProjectPath() {
     if (parentDir.exists(name)) {
         QMessageBox::warning(this, tr("Error"), tr("Ya existe una carpeta \"%1\" en esa ubicacion.").arg(name));
         return QString();
+    }
+    // Rechaza crear el proyecto nuevo adentro de la carpeta RAIZ de OTRO
+    // proyecto ya existente -- osea un ancestro `Foo/` que contenga su
+    // propio `Foo.dfproj` (el mismo nombre, la convencion que arma esta
+    // misma funcion mas abajo con mkpath(name) + parentDir.filePath(name) +
+    // "/" + name + ".dfproj"). Sin este chequeo, el dialogo nativo de
+    // Windows -- que recuerda la ultima carpeta usada entre invocaciones sin
+    // importar el hint que se le pasa como `dir` -- puede dejar caer al
+    // usuario adentro de un proyecto que ya creo antes; si reusa el mismo
+    // nombre (tipico al reintentar guardar una sesion recuperada del
+    // autoguardado, que siempre arranca sin filePath_), el resultado es un
+    // proyecto anidado dentro de si mismo, un nivel mas cada vez.
+    //
+    // A proposito NO se rechaza solo por encontrar CUALQUIER .dfproj suelto
+    // en un ancestro (por ejemplo, en la carpeta de Documentos general, que
+    // puede tener archivos .dfproj de una version anterior a que cada
+    // proyecto tuviera su propia subcarpeta) -- eso bloquearia crear
+    // cualquier proyecto nuevo debajo de esa carpeta sin ningun anidamiento
+    // real, solo por tener otro proyecto sin relacion como vecino en algun
+    // nivel mas arriba.
+    for (QDir ancestor = parentDir;;) {
+        if (ancestor.exists(ancestor.dirName() + QStringLiteral(".dfproj"))) {
+            QMessageBox::warning(
+                this, tr("Error"),
+                tr("La ubicacion elegida esta dentro de la carpeta del proyecto \"%1\". Elegi una ubicacion "
+                   "fuera de cualquier proyecto existente.")
+                    .arg(ancestor.dirName()));
+            return QString();
+        }
+        if (!ancestor.cdUp()) {
+            break;
+        }
     }
     if (!parentDir.mkpath(name)) {
         QMessageBox::warning(this, tr("Error"), tr("No se pudo crear la carpeta del proyecto."));
@@ -1379,6 +1628,8 @@ void MainWindow::onDocumentAdded(uint32_t id) {
     auto* scene = new CircuitScene(project_->document(id), project_->undoStack(id), this);
     connect(scene, &CircuitScene::selectionChanged, this, &MainWindow::onSceneSelectionChanged);
     connect(scene, &CircuitScene::componentContextMenuRequested, this, &MainWindow::onComponentContextMenuRequested);
+    connect(scene, &CircuitScene::componentDoubleClicked, this, &MainWindow::onComponentDoubleClicked);
+    connect(scene, &CircuitScene::junctionDoubleClicked, this, &MainWindow::onJunctionDoubleClicked);
     // Valor por defecto configurado en Preferencias - no afecta documentos ya
     // abiertos, solo el que se acaba de crear (ver PreferencesDialog.hpp).
     scene->setGridVisible(settings_.defaultGridVisible);
@@ -1411,6 +1662,13 @@ void MainWindow::onDocumentAboutToBeRemoved(uint32_t id) {
 }
 
 void MainWindow::onActiveDocumentChanged(uint32_t id) {
+    // Esta senal solo se dispara para circuitos (ver el comentario de
+    // Project::activeDocumentId()/karnaughDocumentAdded en Project.hpp) -
+    // siempre es correcto volver a mostrar view_ en la pila central aca,
+    // sin importar que pestana estuviera al frente antes.
+    if (centralStack_ != nullptr && view_ != nullptr) {
+        centralStack_->setCurrentWidget(view_);
+    }
     if (view_ != nullptr) {
         view_->setScene(scenes_.at(id));
         bindActiveSceneViewActions();
@@ -1461,12 +1719,182 @@ void MainWindow::onDocumentRenamed(uint32_t id) {
     }
 }
 
+void MainWindow::onKarnaughDocumentAdded(uint32_t id) {
+    auto* view = new ui::KarnaughMapView(project_.get(), id, project_->karnaughDocument(id), this);
+    karnaughViews_[id] = view;
+    if (centralStack_ != nullptr) {
+        centralStack_->addWidget(view);
+    }
+    if (documentTabBar_ != nullptr) {
+        addKarnaughDocumentTab(id);
+    }
+}
+
+void MainWindow::onKarnaughDocumentAboutToBeRemoved(uint32_t id) {
+    if (documentTabBar_ != nullptr) {
+        const int tabIndex = tabIndexForDocument(id);
+        if (tabIndex >= 0) {
+            documentTabBar_->removeTab(tabIndex);
+        }
+    }
+    const auto it = karnaughViews_.find(id);
+    if (it == karnaughViews_.end()) {
+        return;
+    }
+    if (centralStack_ != nullptr && centralStack_->currentWidget() == it->second) {
+        // Sin esto, quitar la pagina actual dejaria a centralStack_ sin
+        // ninguna pagina visible (a diferencia de un QTabWidget, un
+        // QStackedWidget no elige automaticamente otra por su cuenta).
+        centralStack_->setCurrentWidget(view_);
+    }
+    if (centralStack_ != nullptr) {
+        centralStack_->removeWidget(it->second);
+    }
+    delete it->second;
+    karnaughViews_.erase(it);
+}
+
+void MainWindow::onKarnaughDocumentRenamed(uint32_t id) {
+    if (documentTabBar_ == nullptr) {
+        return;
+    }
+    const int tabIndex = tabIndexForDocument(id);
+    if (tabIndex >= 0) {
+        documentTabBar_->setTabText(tabIndex, project_->karnaughDocumentName(id));
+    }
+}
+
+void MainWindow::onKarnaughDocumentActivationRequested(uint32_t id) { addKarnaughDocumentTab(id); }
+
+void MainWindow::onTruthTableDocumentAdded(uint32_t id) {
+    auto* view = new ui::TruthTableView(project_.get(), id, project_->truthTableDocument(id), this);
+    truthTableViews_[id] = view;
+    if (centralStack_ != nullptr) {
+        centralStack_->addWidget(view);
+    }
+    if (documentTabBar_ != nullptr) {
+        addTruthTableDocumentTab(id);
+    }
+}
+
+void MainWindow::onTruthTableDocumentAboutToBeRemoved(uint32_t id) {
+    if (documentTabBar_ != nullptr) {
+        const int tabIndex = tabIndexForDocument(id);
+        if (tabIndex >= 0) {
+            documentTabBar_->removeTab(tabIndex);
+        }
+    }
+    const auto it = truthTableViews_.find(id);
+    if (it == truthTableViews_.end()) {
+        return;
+    }
+    if (centralStack_ != nullptr && centralStack_->currentWidget() == it->second) {
+        centralStack_->setCurrentWidget(view_);
+    }
+    if (centralStack_ != nullptr) {
+        centralStack_->removeWidget(it->second);
+    }
+    delete it->second;
+    truthTableViews_.erase(it);
+}
+
+void MainWindow::onTruthTableDocumentRenamed(uint32_t id) {
+    if (documentTabBar_ == nullptr) {
+        return;
+    }
+    const int tabIndex = tabIndexForDocument(id);
+    if (tabIndex >= 0) {
+        documentTabBar_->setTabText(tabIndex, project_->truthTableDocumentName(id));
+    }
+}
+
+void MainWindow::onTruthTableDocumentActivationRequested(uint32_t id) { addTruthTableDocumentTab(id); }
+
+void MainWindow::onExcitationTableDocumentAdded(uint32_t id) {
+    auto* view = new ui::ExcitationTableView(project_.get(), id, project_->excitationTableDocument(id), this);
+    excitationTableViews_[id] = view;
+    if (centralStack_ != nullptr) {
+        centralStack_->addWidget(view);
+    }
+    if (documentTabBar_ != nullptr) {
+        addExcitationTableDocumentTab(id);
+    }
+}
+
+void MainWindow::onExcitationTableDocumentAboutToBeRemoved(uint32_t id) {
+    if (documentTabBar_ != nullptr) {
+        const int tabIndex = tabIndexForDocument(id);
+        if (tabIndex >= 0) {
+            documentTabBar_->removeTab(tabIndex);
+        }
+    }
+    const auto it = excitationTableViews_.find(id);
+    if (it == excitationTableViews_.end()) {
+        return;
+    }
+    if (centralStack_ != nullptr && centralStack_->currentWidget() == it->second) {
+        centralStack_->setCurrentWidget(view_);
+    }
+    if (centralStack_ != nullptr) {
+        centralStack_->removeWidget(it->second);
+    }
+    delete it->second;
+    excitationTableViews_.erase(it);
+}
+
+void MainWindow::onExcitationTableDocumentRenamed(uint32_t id) {
+    if (documentTabBar_ == nullptr) {
+        return;
+    }
+    const int tabIndex = tabIndexForDocument(id);
+    if (tabIndex >= 0) {
+        documentTabBar_->setTabText(tabIndex, project_->excitationTableDocumentName(id));
+    }
+}
+
+void MainWindow::onExcitationTableDocumentActivationRequested(uint32_t id) { addExcitationTableDocumentTab(id); }
+
 void MainWindow::onDocumentTabChanged(int index) {
     if (index < 0) {
         return; // se cerro la ultima pestana visible - ver onDocumentTabCloseRequested()
     }
     const uint32_t id = documentTabBar_->tabData(index).toUInt();
-    project_->setActiveDocument(id);
+    // documentKind() lanza para un id desconocido. Este slot puede dispararse
+    // en medio de una cascada de senales de Project (p. ej. removeTab() de
+    // otra pestana reasignando "la actual" mientras newProject()/
+    // loadFromFile() todavia estan vaciando documents_/karnaughDocuments_/
+    // truthTableDocuments_ una coleccion a la vez) -- en ese instante
+    // transitorio el id de la pestana que Qt elija como nueva actual puede no
+    // estar en NINGUNA coleccion todavia. No hay nada util que hacer con una
+    // pestana en ese estado; se ignora en vez de crashear toda la aplicacion.
+    try {
+        switch (project_->documentKind(id)) {
+            case editor::Project::DocumentKind::Karnaugh:
+                if (centralStack_ != nullptr) {
+                    centralStack_->setCurrentWidget(karnaughViews_.at(id));
+                }
+                setCircuitEditingEnabled(false);
+                return;
+            case editor::Project::DocumentKind::TruthTable:
+                if (centralStack_ != nullptr) {
+                    centralStack_->setCurrentWidget(truthTableViews_.at(id));
+                }
+                setCircuitEditingEnabled(false);
+                return;
+            case editor::Project::DocumentKind::ExcitationTable:
+                if (centralStack_ != nullptr) {
+                    centralStack_->setCurrentWidget(excitationTableViews_.at(id));
+                }
+                setCircuitEditingEnabled(false);
+                return;
+            case editor::Project::DocumentKind::Circuit:
+                setCircuitEditingEnabled(true);
+                project_->setActiveDocument(id);
+                return;
+        }
+    } catch (const std::exception&) {
+        return;
+    }
 }
 
 void MainWindow::onDocumentTabCloseRequested(int index) {
@@ -1489,6 +1917,60 @@ void MainWindow::addDocumentTab(uint32_t id) {
     const int index = documentTabBar_->addTab(project_->documentName(id));
     documentTabBar_->setTabData(index, id);
     documentTabBar_->setCurrentIndex(index);
+}
+
+void MainWindow::addKarnaughDocumentTab(uint32_t id) {
+    const int existing = tabIndexForDocument(id);
+    if (existing >= 0) {
+        documentTabBar_->setCurrentIndex(existing);
+        return;
+    }
+    const int index = documentTabBar_->addTab(project_->karnaughDocumentName(id));
+    documentTabBar_->setTabData(index, id);
+    documentTabBar_->setCurrentIndex(index);
+}
+
+void MainWindow::addTruthTableDocumentTab(uint32_t id) {
+    const int existing = tabIndexForDocument(id);
+    if (existing >= 0) {
+        documentTabBar_->setCurrentIndex(existing);
+        return;
+    }
+    const int index = documentTabBar_->addTab(project_->truthTableDocumentName(id));
+    documentTabBar_->setTabData(index, id);
+    documentTabBar_->setCurrentIndex(index);
+}
+
+void MainWindow::addExcitationTableDocumentTab(uint32_t id) {
+    const int existing = tabIndexForDocument(id);
+    if (existing >= 0) {
+        documentTabBar_->setCurrentIndex(existing);
+        return;
+    }
+    const int index = documentTabBar_->addTab(project_->excitationTableDocumentName(id));
+    documentTabBar_->setTabData(index, id);
+    documentTabBar_->setCurrentIndex(index);
+}
+
+void MainWindow::setCircuitEditingEnabled(bool enabled) {
+    if (editMenu_ != nullptr) {
+        editMenu_->setEnabled(enabled);
+        // QMenu::setEnabled() solo grisa la entrada en la barra de menus -
+        // los atajos de teclado (Supr, R, Ctrl+C/X/V, Ctrl+Z/Y) de cada
+        // QAction hija siguen activos con su contexto Qt::WindowShortcut de
+        // costumbre, sin importar el enabled del QMenu contenedor. Sin este
+        // loop, Supr con una pestana de Karnaugh al frente seguia llamando a
+        // activeScene()->deleteSelected() sobre el circuito oculto detras.
+        for (QAction* action : editMenu_->actions()) {
+            action->setEnabled(enabled);
+        }
+    }
+    if (gridAction_ != nullptr) {
+        gridAction_->setEnabled(enabled);
+    }
+    if (snapAction_ != nullptr) {
+        snapAction_->setEnabled(enabled);
+    }
 }
 
 int MainWindow::tabIndexForDocument(uint32_t id) const {

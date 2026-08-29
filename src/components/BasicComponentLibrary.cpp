@@ -309,7 +309,8 @@ ComponentDefinition makeDecoderDefinition() {
     definition.displayName = "Decodificador";
     definition.description = "N bits de seleccion -> 2^N salidas; una sola salida activa por combinacion.";
     definition.category = ComponentCategory::Plexers;
-    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#EBEBEB"),
+    definition.appearanceVersion = 2; // paintPlexer() ahora rotula pines/fondo oscuro por defecto
+    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
     definition.derivePins = [](const PropertyMap& properties) {
         const auto selectBits = std::get<uint64_t>(properties.at("selectBits"));
@@ -351,7 +352,8 @@ ComponentDefinition makeMultiplexerDefinition() {
     definition.displayName = "Multiplexor";
     definition.description = "2^N lineas de datos + N bits de seleccion -> 1 salida (la linea de datos elegida).";
     definition.category = ComponentCategory::Plexers;
-    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#EBEBEB"),
+    definition.appearanceVersion = 2; // paintPlexer() ahora rotula pines/fondo oscuro por defecto
+    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
     definition.derivePins = [](const PropertyMap& properties) {
         const auto selectBits = std::get<uint64_t>(properties.at("selectBits"));
@@ -397,7 +399,8 @@ ComponentDefinition makeDemultiplexerDefinition() {
     definition.description = "1 entrada de datos + N bits de seleccion -> 2^N salidas (la elegida repite el dato, "
                               "el resto queda en 0).";
     definition.category = ComponentCategory::Plexers;
-    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#EBEBEB"),
+    definition.appearanceVersion = 2; // paintPlexer() ahora rotula pines/fondo oscuro por defecto
+    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
     definition.derivePins = [](const PropertyMap& properties) {
         const auto selectBits = std::get<uint64_t>(properties.at("selectBits"));
@@ -443,7 +446,8 @@ ComponentDefinition makePriorityEncoderDefinition() {
                               "prioridad (la de indice mas alto), mas un pin 'valid' encendido si alguna entrada "
                               "esta activa.";
     definition.category = ComponentCategory::Plexers;
-    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#EBEBEB"),
+    definition.appearanceVersion = 2; // paintPlexer() ahora rotula pines/fondo oscuro por defecto
+    definition.properties = {makeSelectBitsProperty(), makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
     definition.derivePins = [](const PropertyMap& properties) {
         const auto selectBits = std::get<uint64_t>(properties.at("selectBits"));
@@ -533,8 +537,9 @@ ComponentDefinition makeAdderDefinition() {
     definition.displayName = "Sumador";
     definition.description = "Sumador binario de N bits con acarreo de entrada (Cin) y de salida (Cout).";
     definition.category = ComponentCategory::Arithmetic;
-    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#EBEBEB"),
+    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
+    definition.appearanceVersion = 2; // paintArithmetic() ahora rotula pines/fondo oscuro por defecto
     definition.derivePins = [](const PropertyMap& properties) {
         const auto bits = std::get<uint64_t>(properties.at("bits"));
         std::vector<PinTemplate> pins;
@@ -593,8 +598,9 @@ ComponentDefinition makeSubtractorDefinition() {
     definition.displayName = "Restador";
     definition.description = "Restador binario de N bits (A - B) con prestamo de entrada (Bin) y de salida (Bout).";
     definition.category = ComponentCategory::Arithmetic;
-    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#EBEBEB"),
+    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
+    definition.appearanceVersion = 2; // paintArithmetic() ahora rotula pines/fondo oscuro por defecto
     definition.derivePins = [](const PropertyMap& properties) {
         const auto bits = std::get<uint64_t>(properties.at("bits"));
         std::vector<PinTemplate> pins;
@@ -657,8 +663,9 @@ ComponentDefinition makeComparatorDefinition() {
     definition.displayName = "Comparador";
     definition.description = "Comparador de magnitud de N bits sin signo: expone GT (A>B), EQ (A==B) y LT (A<B).";
     definition.category = ComponentCategory::Arithmetic;
-    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#EBEBEB"),
+    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
+    definition.appearanceVersion = 2; // paintArithmetic() ahora rotula pines/fondo oscuro por defecto
     definition.derivePins = [](const PropertyMap& properties) {
         const auto bits = std::get<uint64_t>(properties.at("bits"));
         std::vector<PinTemplate> pins;
@@ -735,22 +742,67 @@ ComponentDefinition makeComparatorDefinition() {
     return definition;
 }
 
+// Compartida por memory.dFlipFlop/memory.jkFlipFlop/memory.tFlipFlop: si el
+// tipo expone pines PRE/CLR asincronicos ademas de D(o J/K/T)/CLK. Apagada
+// por defecto para no romper el simbolo simple ni el ancho de los proyectos
+// ya guardados - ver derivePins de cada tipo, que solo agrega los pines
+// cuando esta en true (siempre al FINAL de la lista, nunca en el medio: ver
+// el comentario sobre pinIndex en CircuitDocument::setProperty()).
+PropertyDescriptor makeAsyncPresetClearProperty() {
+    return PropertyDescriptor{
+        .id = "asyncPresetClear",
+        .displayName = "Preset/Clear asincronos",
+        .description = "Agrega pines PRE/CLR que fuerzan Q a 1/0 de inmediato, sin esperar un flanco de CLK "
+                        "(y lo mantienen mientras esten activos). PRE y CLR activos a la vez es la combinacion "
+                        "invalida clasica: Q y Q' quedan en error mientras dure.",
+        .type = PropertyType::Boolean,
+        .defaultValue = false,
+        .minValue = std::nullopt,
+        .maxValue = std::nullopt,
+        .enumOptions = {},
+        .affectsSimulation = true,
+        .affectsAppearance = true,
+    };
+}
+
+// Polaridad de PRE/CLR cuando estan presentes (ver makeAsyncPresetClearProperty
+// arriba). "activeHigh" es mas facil de razonar (1 = activo, un pin sin
+// conectar queda flotando en Z = inactivo) y es el default; "activeLow"
+// imita la convencion real de los 74xx (ver makeDualDFlipFlopDefinition/
+// makeDualJkFlipFlopDefinition, que la fijan sin exponer esta propiedad).
+PropertyDescriptor makePresetClearPolarityProperty() {
+    return PropertyDescriptor{
+        .id = "presetClearPolarity",
+        .displayName = "Polaridad de PRE/CLR",
+        .description = "Si PRE/CLR se activan con 1 (activo en alto, mas simple) o con 0 (activo en bajo, como "
+                        "en un chip 74xx real).",
+        .type = PropertyType::Enum,
+        .defaultValue = std::string("activeHigh"),
+        .minValue = std::nullopt,
+        .maxValue = std::nullopt,
+        .enumOptions = {"activeHigh", "activeLow"},
+        .affectsSimulation = true,
+        .affectsAppearance = true,
+    };
+}
+
 ComponentDefinition makeSrLatchDefinition() {
     ComponentDefinition definition;
     definition.typeId = "memory.srLatch";
     definition.displayName = "Latch SR";
     definition.description = "Latch SR por NOR cruzados: S=1 fija Q=1 (set), R=1 fija Q=0 (reset), S=R=0 "
                               "mantiene el ultimo estado. S=R=1 simultaneo es la combinacion invalida clasica "
-                              "(Q=Qn=0 mientras dure).";
+                              "(Q=Q'=0 mientras dure).";
     definition.category = ComponentCategory::Memory;
-    definition.properties = {makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#EBEBEB"), makeCustomWidthProperty(),
+    definition.appearanceVersion = 3; // + fondo oscuro por defecto (#2C2D2E), igual criterio que D/JK/T
+    definition.properties = {makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#2C2D2E"), makeCustomWidthProperty(),
                               makeCustomHeightProperty(), makeNotesProperty()};
     definition.derivePins = [](const PropertyMap&) {
         return std::vector<PinTemplate>{
             PinTemplate{"S", core::PinDirection::Input},
             PinTemplate{"R", core::PinDirection::Input},
-            PinTemplate{"Q", core::PinDirection::Output},
-            PinTemplate{"Qn", core::PinDirection::Output},
+            PinTemplate{"Q ", core::PinDirection::Output},
+            PinTemplate{"Q'", core::PinDirection::Output},
         };
     };
     definition.buildSimulation = [](core::Circuit& circuit, const PropertyMap&, const std::vector<NetId>& pinNets) {
@@ -773,22 +825,60 @@ ComponentDefinition makeSrLatchDefinition() {
     return definition;
 }
 
-// D->Q en flanco ascendente de CLK + Qn = NOT Q. Compartido por
-// memory.dFlipFlop (un unico biestable) y los dos biestables independientes
-// de ic74ls.dualDFlipFlop (7474). Devuelve el gateIndex del DFlipFlop
+// Adapta la net de un pin PRE/CLR fisico a lo que GateType::DFlipFlop
+// siempre espera (activo en alto, ver Simulator::step()). En "activeHigh" el
+// pin ya esta en esa convencion: se devuelve tal cual (un pin sin conectar
+// queda en Z = inactivo). En "activeLow" hace falta invertir - pero un NOT
+// sobre un pin sin conectar (Z) daria Unknown y dejaria el biestable
+// indeterminado para siempre, asi que primero se tira la net del pin a 1 con
+// un GateType::WeakOne (mismo mecanismo que wiring.pullResistor: pierde
+// limpio, sin conflicto, contra cualquier driver real que el usuario
+// conecte) y recien despues se invierte.
+NetId asyncControlNet(core::Circuit& circuit, NetId pinNet, bool activeLow) {
+    if (!activeLow) {
+        return pinNet;
+    }
+    (void)circuit.addGate(GateType::WeakOne, std::vector<NetId>{}, pinNet);
+    const NetId inverted = circuit.addNet();
+    (void)circuit.addGate(GateType::Not, std::vector<NetId>{pinNet}, inverted);
+    return inverted;
+}
+
+// Adapta las dos nets PRE/CLR fisicas via asyncControlNet(). Compartida por
+// los flip-flops genericos (memory.dFlipFlop/jkFlipFlop/tFlipFlop, donde
+// `activeLow` sale de la propiedad "presetClearPolarity" - ver
+// makePresetClearPolarityProperty) y por el 7474/7476 (donde `activeLow` va
+// fijo en true, como el chip real, sin exponer esa propiedad).
+std::pair<NetId, NetId> resolveAsyncPresetClear(core::Circuit& circuit, NetId preNet, NetId clrNet, bool activeLow) {
+    return {asyncControlNet(circuit, preNet, activeLow), asyncControlNet(circuit, clrNet, activeLow)};
+}
+
+// D->Q en flanco ascendente de CLK + Q' = NOT Q, con PRE/CLR asincronicos
+// opcionales (ya en la convencion activo-alto que espera el primitivo - ver
+// asyncControlNet). Compartido por memory.dFlipFlop (un unico biestable),
+// los dos biestables independientes de ic74ls.dualDFlipFlop (7474) y (vía
+// addJkFlipFlopStage) memory.tFlipFlop. Devuelve el gateIndex del DFlipFlop
 // (representativo para ComponentSimBinding).
-uint32_t addDFlipFlopStage(core::Circuit& circuit, NetId d, NetId clk, NetId q, NetId qn) {
-    const uint32_t gateIndex = circuit.addGate(GateType::DFlipFlop, std::vector<NetId>{d, clk}, q);
+uint32_t addDFlipFlopStage(core::Circuit& circuit, NetId d, NetId clk, NetId q, NetId qn,
+                            std::optional<NetId> pre = std::nullopt, std::optional<NetId> clr = std::nullopt) {
+    const uint32_t gateIndex = pre.has_value() && clr.has_value()
+                                    ? circuit.addGate(GateType::DFlipFlop, std::vector<NetId>{d, clk, *pre, *clr}, q)
+                                    : circuit.addGate(GateType::DFlipFlop, std::vector<NetId>{d, clk}, q);
     (void)circuit.addGate(GateType::Not, std::vector<NetId>{q}, qn);
     return gateIndex;
 }
 
 // Conversion JK -> D realimentando el propio Q (dEquiv = (J & !Q) | (!K &
-// Q), igual que el comparador realimentaba runningEq) + Qn = NOT Q.
-// Compartido por memory.jkFlipFlop y los dos biestables independientes de
-// ic74ls.dualJkFlipFlop (7476). Devuelve el gateIndex del primer NOT
-// (representativo para ComponentSimBinding).
-uint32_t addJkFlipFlopStage(core::Circuit& circuit, NetId j, NetId k, NetId clk, NetId q, NetId qn) {
+// Q), igual que el comparador realimentaba runningEq) + Q' = NOT Q, con
+// PRE/CLR asincronicos opcionales (idem addDFlipFlopStage). Al forzar Q, la
+// realimentacion recalcula dEquiv sola: el proximo flanco de CLK arranca ya
+// del estado forzado, sin nada mas que hacer. Compartido por
+// memory.jkFlipFlop, los dos biestables independientes de
+// ic74ls.dualJkFlipFlop (7476) y memory.tFlipFlop (T = JK con J=K=T).
+// Devuelve el gateIndex del primer NOT (representativo para
+// ComponentSimBinding).
+uint32_t addJkFlipFlopStage(core::Circuit& circuit, NetId j, NetId k, NetId clk, NetId q, NetId qn,
+                             std::optional<NetId> pre = std::nullopt, std::optional<NetId> clr = std::nullopt) {
     const NetId notQ = circuit.addNet();
     const uint32_t firstGateIndex = circuit.addGate(GateType::Not, std::vector<NetId>{q}, notQ);
     const NetId notK = circuit.addNet();
@@ -799,7 +889,11 @@ uint32_t addJkFlipFlopStage(core::Circuit& circuit, NetId j, NetId k, NetId clk,
     (void)circuit.addGate(GateType::And, std::vector<NetId>{notK, q}, term2);
     const NetId dEquiv = circuit.addNet();
     (void)circuit.addGate(GateType::Or, std::vector<NetId>{term1, term2}, dEquiv);
-    (void)circuit.addGate(GateType::DFlipFlop, std::vector<NetId>{dEquiv, clk}, q);
+    if (pre.has_value() && clr.has_value()) {
+        (void)circuit.addGate(GateType::DFlipFlop, std::vector<NetId>{dEquiv, clk, *pre, *clr}, q);
+    } else {
+        (void)circuit.addGate(GateType::DFlipFlop, std::vector<NetId>{dEquiv, clk}, q);
+    }
     (void)circuit.addGate(GateType::Not, std::vector<NetId>{q}, qn);
     return firstGateIndex;
 }
@@ -809,22 +903,45 @@ ComponentDefinition makeDFlipFlopDefinition() {
     definition.typeId = "memory.dFlipFlop";
     definition.displayName = "Flip-Flop D";
     definition.description = "Biestable D disparado por flanco ascendente de CLK: en cada flanco 0->1 copia D a Q "
-                              "y lo mantiene hasta el proximo flanco. Cambios en D con CLK quieto no afectan Q.";
+                              "y lo mantiene hasta el proximo flanco. Cambios en D con CLK quieto no afectan Q. "
+                              "Con 'Preset/Clear asincronos' activado, PRE/CLR fuerzan Q a 1/0 de inmediato, sin "
+                              "esperar un flanco.";
     definition.category = ComponentCategory::Memory;
-    definition.properties = {makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#EBEBEB"), makeCustomWidthProperty(),
-                              makeCustomHeightProperty(), makeNotesProperty()};
-    definition.derivePins = [](const PropertyMap&) {
-        return std::vector<PinTemplate>{
+    definition.definitionVersion = 2;
+    definition.behaviorVersion = 2;
+    definition.appearanceVersion = 2;
+    definition.properties = {makeAsyncPresetClearProperty(),
+                              makePresetClearPolarityProperty(),
+                              makeLabelProperty(),
+                              makeLabelRotationProperty(),
+                              makeBodyColorProperty("#2C2D2E"),
+                              makeCustomWidthProperty(),
+                              makeCustomHeightProperty(),
+                              makeNotesProperty()};
+    definition.derivePins = [](const PropertyMap& properties) {
+        std::vector<PinTemplate> pins{
             PinTemplate{"D", core::PinDirection::Input},
             PinTemplate{"CLK", core::PinDirection::Input},
-            PinTemplate{"Q", core::PinDirection::Output},
-            PinTemplate{"Qn", core::PinDirection::Output},
+            PinTemplate{"Q ", core::PinDirection::Output},
+            PinTemplate{"Q'", core::PinDirection::Output},
         };
+        if (std::get<bool>(properties.at("asyncPresetClear"))) {
+            pins.push_back(PinTemplate{"PRE", core::PinDirection::Input});
+            pins.push_back(PinTemplate{"CLR", core::PinDirection::Input});
+        }
+        return pins;
     };
-    definition.buildSimulation = [](core::Circuit& circuit, const PropertyMap&, const std::vector<NetId>& pinNets) {
+    definition.buildSimulation = [](core::Circuit& circuit, const PropertyMap& properties,
+                                     const std::vector<NetId>& pinNets) {
         ComponentSimBinding binding;
         binding.kind = ComponentSimBinding::Kind::Driver;
-        binding.gateIndex = addDFlipFlopStage(circuit, pinNets[0], pinNets[1], pinNets[2], pinNets[3]);
+        if (std::get<bool>(properties.at("asyncPresetClear"))) {
+            const bool activeLow = std::get<std::string>(properties.at("presetClearPolarity")) == "activeLow";
+            const auto [pre, clr] = resolveAsyncPresetClear(circuit, pinNets[4], pinNets[5], activeLow);
+            binding.gateIndex = addDFlipFlopStage(circuit, pinNets[0], pinNets[1], pinNets[2], pinNets[3], pre, clr);
+        } else {
+            binding.gateIndex = addDFlipFlopStage(circuit, pinNets[0], pinNets[1], pinNets[2], pinNets[3]);
+        }
         return binding;
     };
     return definition;
@@ -835,23 +952,98 @@ ComponentDefinition makeJkFlipFlopDefinition() {
     definition.typeId = "memory.jkFlipFlop";
     definition.displayName = "Flip-Flop JK";
     definition.description = "Biestable JK disparado por flanco ascendente de CLK: J=1,K=0 pone Q=1 (set); "
-                              "J=0,K=1 pone Q=0 (reset); J=K=0 mantiene Q; J=K=1 invierte Q (toggle) en cada flanco.";
+                              "J=0,K=1 pone Q=0 (reset); J=K=0 mantiene Q; J=K=1 invierte Q (toggle) en cada "
+                              "flanco. Con 'Preset/Clear asincronos' activado, PRE/CLR fuerzan Q a 1/0 de "
+                              "inmediato, sin esperar un flanco.";
     definition.category = ComponentCategory::Memory;
-    definition.properties = {makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#EBEBEB"), makeCustomWidthProperty(),
-                              makeCustomHeightProperty(), makeNotesProperty()};
-    definition.derivePins = [](const PropertyMap&) {
-        return std::vector<PinTemplate>{
+    definition.definitionVersion = 2;
+    definition.behaviorVersion = 2;
+    definition.appearanceVersion = 2;
+    definition.properties = {makeAsyncPresetClearProperty(),
+                              makePresetClearPolarityProperty(),
+                              makeLabelProperty(),
+                              makeLabelRotationProperty(),
+                              makeBodyColorProperty("#2C2D2E"),
+                              makeCustomWidthProperty(),
+                              makeCustomHeightProperty(),
+                              makeNotesProperty()};
+    definition.derivePins = [](const PropertyMap& properties) {
+        std::vector<PinTemplate> pins{
             PinTemplate{"J", core::PinDirection::Input},
             PinTemplate{"K", core::PinDirection::Input},
             PinTemplate{"CLK", core::PinDirection::Input},
-            PinTemplate{"Q", core::PinDirection::Output},
-            PinTemplate{"Qn", core::PinDirection::Output},
+            PinTemplate{"Q ", core::PinDirection::Output},
+            PinTemplate{"Q'", core::PinDirection::Output},
         };
+        if (std::get<bool>(properties.at("asyncPresetClear"))) {
+            pins.push_back(PinTemplate{"PRE", core::PinDirection::Input});
+            pins.push_back(PinTemplate{"CLR", core::PinDirection::Input});
+        }
+        return pins;
     };
-    definition.buildSimulation = [](core::Circuit& circuit, const PropertyMap&, const std::vector<NetId>& pinNets) {
+    definition.buildSimulation = [](core::Circuit& circuit, const PropertyMap& properties,
+                                     const std::vector<NetId>& pinNets) {
         ComponentSimBinding binding;
         binding.kind = ComponentSimBinding::Kind::Driver;
-        binding.gateIndex = addJkFlipFlopStage(circuit, pinNets[0], pinNets[1], pinNets[2], pinNets[3], pinNets[4]);
+        if (std::get<bool>(properties.at("asyncPresetClear"))) {
+            const bool activeLow = std::get<std::string>(properties.at("presetClearPolarity")) == "activeLow";
+            const auto [pre, clr] = resolveAsyncPresetClear(circuit, pinNets[5], pinNets[6], activeLow);
+            binding.gateIndex =
+                addJkFlipFlopStage(circuit, pinNets[0], pinNets[1], pinNets[2], pinNets[3], pinNets[4], pre, clr);
+        } else {
+            binding.gateIndex =
+                addJkFlipFlopStage(circuit, pinNets[0], pinNets[1], pinNets[2], pinNets[3], pinNets[4]);
+        }
+        return binding;
+    };
+    return definition;
+}
+
+ComponentDefinition makeTFlipFlopDefinition() {
+    ComponentDefinition definition;
+    definition.typeId = "memory.tFlipFlop";
+    definition.displayName = "Flip-Flop T";
+    definition.description = "Biestable T (toggle) disparado por flanco ascendente de CLK: T=1 invierte Q en "
+                              "cada flanco; T=0 mantiene Q. Equivale a un JK con J=K=T - util para contadores "
+                              "asincronicos y divisores de frecuencia. Con 'Preset/Clear asincronos' activado, "
+                              "PRE/CLR fuerzan Q a 1/0 de inmediato, sin esperar un flanco.";
+    definition.category = ComponentCategory::Memory;
+    definition.properties = {makeAsyncPresetClearProperty(),
+                              makePresetClearPolarityProperty(),
+                              makeLabelProperty(),
+                              makeLabelRotationProperty(),
+                              makeBodyColorProperty("#2C2D2E"),
+                              makeCustomWidthProperty(),
+                              makeCustomHeightProperty(),
+                              makeNotesProperty()};
+    definition.derivePins = [](const PropertyMap& properties) {
+        std::vector<PinTemplate> pins{
+            PinTemplate{"T", core::PinDirection::Input},
+            PinTemplate{"CLK", core::PinDirection::Input},
+            PinTemplate{"Q ", core::PinDirection::Output},
+            PinTemplate{"Q'", core::PinDirection::Output},
+        };
+        if (std::get<bool>(properties.at("asyncPresetClear"))) {
+            pins.push_back(PinTemplate{"PRE", core::PinDirection::Input});
+            pins.push_back(PinTemplate{"CLR", core::PinDirection::Input});
+        }
+        return pins;
+    };
+    definition.buildSimulation = [](core::Circuit& circuit, const PropertyMap& properties,
+                                     const std::vector<NetId>& pinNets) {
+        ComponentSimBinding binding;
+        binding.kind = ComponentSimBinding::Kind::Driver;
+        const NetId t = pinNets[0];
+        const NetId clk = pinNets[1];
+        const NetId q = pinNets[2];
+        const NetId qn = pinNets[3];
+        if (std::get<bool>(properties.at("asyncPresetClear"))) {
+            const bool activeLow = std::get<std::string>(properties.at("presetClearPolarity")) == "activeLow";
+            const auto [pre, clr] = resolveAsyncPresetClear(circuit, pinNets[4], pinNets[5], activeLow);
+            binding.gateIndex = addJkFlipFlopStage(circuit, t, t, clk, q, qn, pre, clr);
+        } else {
+            binding.gateIndex = addJkFlipFlopStage(circuit, t, t, clk, q, qn);
+        }
         return binding;
     };
     return definition;
@@ -864,7 +1056,8 @@ ComponentDefinition makeRegisterDefinition() {
     definition.description = "Banco de N flip-flops D con un CLK compartido: en cada flanco ascendente de CLK "
                               "carga D0..D(bits-1) en Q0..Q(bits-1) simultaneamente.";
     definition.category = ComponentCategory::Memory;
-    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#EBEBEB"),
+    definition.appearanceVersion = 3; // + fondo oscuro por defecto (#2C2D2E), igual criterio que D/JK/T
+    definition.properties = {makeBitsProperty(),        makeLabelProperty(), makeLabelRotationProperty(),      makeBodyColorProperty("#2C2D2E"),
                               makeCustomWidthProperty(), makeCustomHeightProperty(), makeNotesProperty()};
     definition.derivePins = [](const PropertyMap& properties) {
         const auto bits = std::get<uint64_t>(properties.at("bits"));
@@ -874,7 +1067,7 @@ ComponentDefinition makeRegisterDefinition() {
         }
         pins.push_back(PinTemplate{"CLK", core::PinDirection::Input});
         for (uint64_t i = 0; i < bits; ++i) {
-            pins.push_back(PinTemplate{"Q" + std::to_string(i), core::PinDirection::Output});
+            pins.push_back(PinTemplate{"Q " + std::to_string(i), core::PinDirection::Output});
         }
         return pins;
     };
@@ -1539,6 +1732,20 @@ ComponentDefinition makeHexDisplayDefinition() {
             .affectsSimulation = true,
             .affectsAppearance = true,
         },
+        PropertyDescriptor{
+            .id = "bitOrder",
+            .displayName = "Orden de bits",
+            .description = "Orden fisico de los 4 pines de entrada: LSB primero (bit0 arriba, por defecto) o MSB "
+                            "primero (bit3 arriba). No cambia el numero decodificado, solo que pin corresponde a "
+                            "cada bit -- util para que el cableado quede prolijo segun de que lado vengan los bits.",
+            .type = PropertyType::Enum,
+            .defaultValue = std::string("lsbFirst"),
+            .minValue = std::nullopt,
+            .maxValue = std::nullopt,
+            .enumOptions = {"lsbFirst", "msbFirst"},
+            .affectsSimulation = true,
+            .affectsAppearance = true,
+        },
         makeColorOptionProperty(),
         makeLabelProperty(), makeLabelRotationProperty(),
         makeCustomWidthProperty(),
@@ -1546,12 +1753,19 @@ ComponentDefinition makeHexDisplayDefinition() {
         makeNotesProperty(),
     };
     definition.derivePins = [](const PropertyMap& properties) {
-        std::vector<PinTemplate> pins{
-            PinTemplate{"bit0", core::PinDirection::Input},
-            PinTemplate{"bit1", core::PinDirection::Input},
-            PinTemplate{"bit2", core::PinDirection::Input},
-            PinTemplate{"bit3", core::PinDirection::Input},
-        };
+        std::vector<PinTemplate> pins = hexDisplayIsMsbFirst(properties)
+                                             ? std::vector<PinTemplate>{
+                                                   PinTemplate{"bit3", core::PinDirection::Input},
+                                                   PinTemplate{"bit2", core::PinDirection::Input},
+                                                   PinTemplate{"bit1", core::PinDirection::Input},
+                                                   PinTemplate{"bit0", core::PinDirection::Input},
+                                               }
+                                             : std::vector<PinTemplate>{
+                                                   PinTemplate{"bit0", core::PinDirection::Input},
+                                                   PinTemplate{"bit1", core::PinDirection::Input},
+                                                   PinTemplate{"bit2", core::PinDirection::Input},
+                                                   PinTemplate{"bit3", core::PinDirection::Input},
+                                               };
         if (std::get<bool>(properties.at("hasDecimalPoint"))) {
             pins.push_back(PinTemplate{"dot", core::PinDirection::Input});
         }
@@ -1940,18 +2154,19 @@ ComponentDefinition makeDualDFlipFlopDefinition() {
     definition.displayName = "7474 - Flip-Flop D dual";
     definition.partNumber = "7474";
     definition.description = "Dos biestables D independientes (cada uno disparado por flanco ascendente de su "
-                              "propio CLK) en un mismo paquete (7474 real). Sin PRE/CLR (mismo recorte ya "
-                              "establecido en memory.dFlipFlop).";
-    // PR (preset)/CLR (clear) asincronicos del 7474 real, por biestable -
-    // solo decorativos (ver el comentario de PhysicalPin en
-    // ComponentDefinition.hpp): el primitivo GateType::DFlipFlop de este
-    // simulador solo acepta D/CLK, sin un tercer pin de preset/clear.
+                              "propio CLK, con su propio PR/CLR asincronicos activos en bajo) en un mismo "
+                              "paquete (7474 real).";
+    definition.definitionVersion = 2;
+    definition.behaviorVersion = 2;
+    definition.appearanceVersion = 2;
     // Orden fisico real (14 pines, pin1->14): 1CLR,1D,1CLK,1PRE,1Q,1Qn,
-    // GND,2Qn,2Q,2PRE,2CLK,2D,2CLR,VCC.
+    // GND,2Qn,2Q,2PRE,2CLK,2D,2CLR,VCC. PR/CLR ahora son funcionales
+    // (activos en bajo, como el chip real - ver resolveAsyncPresetClear con
+    // activeLow fijo mas abajo); GND/VCC siguen siendo decorativos.
     definition.physicalPinout = {
-        {"CLR1", false}, {"D1", true}, {"CLK1", true}, {"PR1", false}, {"Q1", true}, {"Qn1", true},
-        {"GND", false}, {"Qn2", true}, {"Q2", true}, {"PR2", false}, {"CLK2", true}, {"D2", true},
-        {"CLR2", false}, {"VCC", false},
+        {"CLR1", true}, {"D1", true}, {"CLK1", true}, {"PR1", true}, {"Q1", true}, {"Qn1", true},
+        {"GND", false}, {"Qn2", true}, {"Q2", true}, {"PR2", true}, {"CLK2", true}, {"D2", true},
+        {"CLR2", true}, {"VCC", false},
     };
     definition.category = ComponentCategory::Ic74LS;
     definition.properties = {makeLabelProperty(), makeLabelRotationProperty(), makeBodyColorProperty("#2B2B2B"), makeCustomWidthProperty(),
@@ -1962,11 +2177,21 @@ ComponentDefinition makeDualDFlipFlopDefinition() {
             PinTemplate{"D2", core::PinDirection::Input},  PinTemplate{"CLK2", core::PinDirection::Input},
             PinTemplate{"Q1", core::PinDirection::Output}, PinTemplate{"Qn1", core::PinDirection::Output},
             PinTemplate{"Q2", core::PinDirection::Output}, PinTemplate{"Qn2", core::PinDirection::Output},
+            // PR/CLR al final, no en el medio: no correr el indice de
+            // ningun pin ya existente (ver CircuitDocument::setProperty(),
+            // que invalida cables comparando indice contra cantidad de
+            // pines - insertarlos en el medio recablearia Q/Q' en
+            // silencio).
+            PinTemplate{"PR1", core::PinDirection::Input}, PinTemplate{"CLR1", core::PinDirection::Input},
+            PinTemplate{"PR2", core::PinDirection::Input}, PinTemplate{"CLR2", core::PinDirection::Input},
         };
     };
     definition.buildSimulation = [](core::Circuit& circuit, const PropertyMap&, const std::vector<NetId>& pinNets) {
-        const uint32_t firstGateIndex = addDFlipFlopStage(circuit, pinNets[0], pinNets[1], pinNets[4], pinNets[5]);
-        (void)addDFlipFlopStage(circuit, pinNets[2], pinNets[3], pinNets[6], pinNets[7]);
+        const auto [pre1, clr1] = resolveAsyncPresetClear(circuit, pinNets[8], pinNets[9], /*activeLow=*/true);
+        const auto [pre2, clr2] = resolveAsyncPresetClear(circuit, pinNets[10], pinNets[11], /*activeLow=*/true);
+        const uint32_t firstGateIndex =
+            addDFlipFlopStage(circuit, pinNets[0], pinNets[1], pinNets[4], pinNets[5], pre1, clr1);
+        (void)addDFlipFlopStage(circuit, pinNets[2], pinNets[3], pinNets[6], pinNets[7], pre2, clr2);
         ComponentSimBinding binding;
         binding.kind = ComponentSimBinding::Kind::Driver;
         binding.gateIndex = firstGateIndex;
@@ -1981,15 +2206,17 @@ ComponentDefinition makeDualJkFlipFlopDefinition() {
     definition.displayName = "7476 - Flip-Flop JK dual";
     definition.partNumber = "7476";
     definition.description = "Dos biestables JK independientes (cada uno disparado por flanco ascendente de su "
-                              "propio CLK) en un mismo paquete (7476 real). Sin PRE/CLR (mismo recorte ya "
-                              "establecido en memory.jkFlipFlop).";
-    // PR/CLR asincronicos del 7476 real, por biestable - solo decorativos
-    // (mismo motivo que en ic74ls.dualDFlipFlop de arriba).
+                              "propio CLK, con su propio PR/CLR asincronicos activos en bajo) en un mismo "
+                              "paquete (7476 real).";
+    definition.definitionVersion = 2;
+    definition.behaviorVersion = 2;
+    definition.appearanceVersion = 2;
     // Orden fisico real (16 pines, pin1->16): 1CLK,1PRE,1CLR,1J,VCC,2CLK,
-    // 2PRE,2CLR,2J,2Qn,2Q,2K,GND,1Qn,1Q,1K.
+    // 2PRE,2CLR,2J,2Qn,2Q,2K,GND,1Qn,1Q,1K. PR/CLR ahora son funcionales
+    // (activos en bajo, como el chip real); VCC/GND siguen decorativos.
     definition.physicalPinout = {
-        {"CLK1", true}, {"PR1", false}, {"CLR1", false}, {"J1", true}, {"VCC", false}, {"CLK2", true},
-        {"PR2", false}, {"CLR2", false}, {"J2", true}, {"Qn2", true}, {"Q2", true}, {"K2", true},
+        {"CLK1", true}, {"PR1", true}, {"CLR1", true}, {"J1", true}, {"VCC", false}, {"CLK2", true},
+        {"PR2", true}, {"CLR2", true}, {"J2", true}, {"Qn2", true}, {"Q2", true}, {"K2", true},
         {"GND", false}, {"Qn1", true}, {"Q1", true}, {"K1", true},
     };
     definition.category = ComponentCategory::Ic74LS;
@@ -2002,12 +2229,17 @@ ComponentDefinition makeDualJkFlipFlopDefinition() {
             PinTemplate{"K2", core::PinDirection::Input},   PinTemplate{"CLK2", core::PinDirection::Input},
             PinTemplate{"Q1", core::PinDirection::Output},  PinTemplate{"Qn1", core::PinDirection::Output},
             PinTemplate{"Q2", core::PinDirection::Output},  PinTemplate{"Qn2", core::PinDirection::Output},
+            // Al final, no en el medio - mismo motivo que en el 7474.
+            PinTemplate{"PR1", core::PinDirection::Input},  PinTemplate{"CLR1", core::PinDirection::Input},
+            PinTemplate{"PR2", core::PinDirection::Input},  PinTemplate{"CLR2", core::PinDirection::Input},
         };
     };
     definition.buildSimulation = [](core::Circuit& circuit, const PropertyMap&, const std::vector<NetId>& pinNets) {
+        const auto [pre1, clr1] = resolveAsyncPresetClear(circuit, pinNets[10], pinNets[11], /*activeLow=*/true);
+        const auto [pre2, clr2] = resolveAsyncPresetClear(circuit, pinNets[12], pinNets[13], /*activeLow=*/true);
         const uint32_t firstGateIndex =
-            addJkFlipFlopStage(circuit, pinNets[0], pinNets[1], pinNets[2], pinNets[6], pinNets[7]);
-        (void)addJkFlipFlopStage(circuit, pinNets[3], pinNets[4], pinNets[5], pinNets[8], pinNets[9]);
+            addJkFlipFlopStage(circuit, pinNets[0], pinNets[1], pinNets[2], pinNets[6], pinNets[7], pre1, clr1);
+        (void)addJkFlipFlopStage(circuit, pinNets[3], pinNets[4], pinNets[5], pinNets[8], pinNets[9], pre2, clr2);
         ComponentSimBinding binding;
         binding.kind = ComponentSimBinding::Kind::Driver;
         binding.gateIndex = firstGateIndex;
@@ -2460,6 +2692,7 @@ void registerBasicComponentLibrary(ComponentRegistry& registry) {
     registry.registerDefinition(makeSrLatchDefinition());
     registry.registerDefinition(makeDFlipFlopDefinition());
     registry.registerDefinition(makeJkFlipFlopDefinition());
+    registry.registerDefinition(makeTFlipFlopDefinition());
     registry.registerDefinition(makeRegisterDefinition());
     registry.registerDefinition(makeSubcircuitDefinition());
     registry.registerDefinition(makeLedDefinition());
@@ -2575,6 +2808,23 @@ HexDisplayState hexDisplayState(const ComponentInstance& display, LogicValue bit
         }
     }
     return HexDisplayState{.valid = true, .segments = hexDigitSegments(value)};
+}
+
+bool hexDisplayIsMsbFirst(const PropertyMap& properties) {
+    const auto it = properties.find("bitOrder");
+    if (it == properties.end()) {
+        return false; // proyecto guardado antes de que existiera la propiedad
+    }
+    const auto* order = std::get_if<std::string>(&it->second);
+    return order != nullptr && *order == "msbFirst";
+}
+
+bool hexDisplayIsMsbFirst(const ComponentInstance& display) {
+    if (display.typeId() != "io.hexDisplay") {
+        return false;
+    }
+    const auto* order = std::get_if<std::string>(&display.property("bitOrder"));
+    return order != nullptr && *order == "msbFirst";
 }
 
 bool ledMatrixIsMultiplexed(const PropertyMap& properties) {

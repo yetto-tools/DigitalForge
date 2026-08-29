@@ -20,7 +20,7 @@ Actions (ver `.github/workflows/release.yml`) al empujar un tag `v*`.
 
 ## Estado del proyecto
 
-Versión actual: **0.1.0** (pre-alpha). El núcleo de simulación y el editor
+Versión actual: **0.1.4** (pre-alpha). El núcleo de simulación y el editor
 gráfico Qt6 funcionan de extremo a extremo: se puede colocar componentes,
 cablearlos, simular y guardar/abrir proyectos.
 
@@ -109,7 +109,7 @@ secuenciales armados de primitivas, no un lenguaje con compilador.
 - CMake 3.24 o superior.
 - Compilador con soporte de C++20 (GCC reciente, Clang reciente o MSVC reciente).
 - Catch2 (se descarga automáticamente vía `FetchContent` al configurar).
-- Qt 6.5 o superior (solo cuando se active `DIGITALFORGE_BUILD_GUI`, a partir de la Fase 2).
+- Qt 6.8.3 o superior (solo cuando se active `DIGITALFORGE_BUILD_GUI`, a partir de la Fase 2).
 
 ## Compilación en Windows (PowerShell)
 
@@ -128,10 +128,10 @@ los ejecutables quedan en `build\tests\` y `build\benchmark\` en lugar de
 
 Requiere Qt 6.5+ (mingw_64) y el MinGW que viene con ese kit de Qt (deben
 coincidir, o el `.exe` falla al arrancar por DLLs de runtime desajustadas -
-ver mas abajo). Ejemplo con Qt 6.7.3 mingw_64:
+ver mas abajo). Ejemplo con Qt 6.8.3 mingw_64:
 
 ```powershell
-$env:PATH = "C:\Qt\6.7.3\mingw_64\bin;C:\Qt\Tools\mingw1310_64\bin;$env:PATH"
+$env:PATH = "C:\Qt\6.8.3\mingw_64\bin;C:\Qt\Tools\mingw1310_64\bin;$env:PATH"
 cmake -S . -B build-gui -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DDIGITALFORGE_BUILD_GUI=ON
 cmake --build build-gui --target DigitalForge -j
 ```

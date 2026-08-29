@@ -212,11 +212,13 @@ TEST_CASE("DFlipFlop captures D only on a clean rising edge of CLK, ignoring D-o
     Simulator sim(circuit);
     sim.setInput(ipD, LogicValue::One);
     REQUIRE(sim.runUntilStable());
-    CHECK(sim.getNetValue(q) == LogicValue::HighImpedance); // sin flanco todavia, Q no se toco
+    // Q arranca en Zero, no flotante (ver Simulator::seedSourceGates()) -
+    // sin flanco todavia sigue en ese valor inicial, D=1 no lo toco.
+    CHECK(sim.getNetValue(q) == LogicValue::Zero);
 
     sim.setInput(ipClk, LogicValue::Zero);
     REQUIRE(sim.runUntilStable());
-    CHECK(sim.getNetValue(q) == LogicValue::HighImpedance); // CLK bajo no dispara nada
+    CHECK(sim.getNetValue(q) == LogicValue::Zero); // CLK bajo no dispara nada
 
     sim.setInput(ipClk, LogicValue::One); // flanco ascendente confirmado (CLK previo era Zero)
     REQUIRE(sim.runUntilStable());
@@ -254,6 +256,105 @@ TEST_CASE("DFlipFlop yields Unknown on a first rising edge without a confirmed p
     sim.setInput(ipClk, LogicValue::One);
     REQUIRE(sim.runUntilStable());
     CHECK(sim.getNetValue(q) == LogicValue::Unknown);
+}
+
+TEST_CASE("DFlipFlop PRE/CLR (4-input form) force Q asynchronously, without waiting for a CLK edge, and Q holds "
+          "the forced value after release",
+          "[simulator][dflipflop][presetclear]") {
+    Circuit circuit;
+    const NetId d = circuit.addNet();
+    const NetId clk = circuit.addNet();
+    const NetId pre = circuit.addNet();
+    const NetId clr = circuit.addNet();
+    const NetId q = circuit.addNet();
+    const std::vector<NetId> none;
+    const uint32_t ipD = circuit.addGate(GateType::InputPin, none, d);
+    const uint32_t ipClk = circuit.addGate(GateType::InputPin, none, clk);
+    const uint32_t ipPre = circuit.addGate(GateType::InputPin, none, pre);
+    const uint32_t ipClr = circuit.addGate(GateType::InputPin, none, clr);
+    (void)circuit.addGate(GateType::DFlipFlop, std::vector<NetId>{d, clk, pre, clr}, q);
+
+    Simulator sim(circuit);
+    sim.setInput(ipD, LogicValue::Zero);
+    sim.setInput(ipClk, LogicValue::Zero);
+    sim.setInput(ipPre, LogicValue::Zero);
+    sim.setInput(ipClr, LogicValue::Zero);
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(q) == LogicValue::Zero); // PRE/CLR inactivos, Q ya arranca en Zero
+
+    sim.setInput(ipPre, LogicValue::One); // PRE fuerza Q=1 de inmediato, CLK sigue en 0
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(q) == LogicValue::One);
+
+    sim.setInput(ipPre, LogicValue::Zero); // se suelta PRE sin ningun flanco nuevo
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(q) == LogicValue::One); // Q retiene el valor forzado
+
+    sim.setInput(ipClr, LogicValue::One); // CLR fuerza Q=0 de inmediato
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(q) == LogicValue::Zero);
+
+    sim.setInput(ipClr, LogicValue::Zero);
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(q) == LogicValue::Zero); // idem, retiene
+}
+
+TEST_CASE("DFlipFlop PRE active overrides a CLK edge: D is not captured while PRE holds Q at One",
+          "[simulator][dflipflop][presetclear]") {
+    Circuit circuit;
+    const NetId d = circuit.addNet();
+    const NetId clk = circuit.addNet();
+    const NetId pre = circuit.addNet();
+    const NetId clr = circuit.addNet();
+    const NetId q = circuit.addNet();
+    const std::vector<NetId> none;
+    const uint32_t ipD = circuit.addGate(GateType::InputPin, none, d);
+    const uint32_t ipClk = circuit.addGate(GateType::InputPin, none, clk);
+    const uint32_t ipPre = circuit.addGate(GateType::InputPin, none, pre);
+    const uint32_t ipClr = circuit.addGate(GateType::InputPin, none, clr);
+    (void)circuit.addGate(GateType::DFlipFlop, std::vector<NetId>{d, clk, pre, clr}, q);
+
+    Simulator sim(circuit);
+    sim.setInput(ipD, LogicValue::Zero); // D=0: si el flanco capturara, Q bajaria a 0
+    sim.setInput(ipClk, LogicValue::Zero);
+    sim.setInput(ipClr, LogicValue::Zero);
+    sim.setInput(ipPre, LogicValue::One); // PRE ya activo antes del flanco
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(q) == LogicValue::One);
+
+    sim.setInput(ipClk, LogicValue::One); // flanco ascendente confirmado, con PRE todavia activo
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(q) == LogicValue::One); // PRE manda: D no se captura
+}
+
+TEST_CASE("DFlipFlop PRE and CLR active at the same time yields Error", "[simulator][dflipflop][presetclear]") {
+    Circuit circuit;
+    const NetId d = circuit.addNet();
+    const NetId clk = circuit.addNet();
+    const NetId pre = circuit.addNet();
+    const NetId clr = circuit.addNet();
+    const NetId q = circuit.addNet();
+    const std::vector<NetId> none;
+    const uint32_t ipD = circuit.addGate(GateType::InputPin, none, d);
+    const uint32_t ipClk = circuit.addGate(GateType::InputPin, none, clk);
+    const uint32_t ipPre = circuit.addGate(GateType::InputPin, none, pre);
+    const uint32_t ipClr = circuit.addGate(GateType::InputPin, none, clr);
+    (void)circuit.addGate(GateType::DFlipFlop, std::vector<NetId>{d, clk, pre, clr}, q);
+
+    Simulator sim(circuit);
+    sim.setInput(ipD, LogicValue::Zero);
+    sim.setInput(ipClk, LogicValue::Zero);
+    sim.setInput(ipPre, LogicValue::Zero);
+    sim.setInput(ipClr, LogicValue::Zero);
+    REQUIRE(sim.runUntilStable());
+
+    sim.setInput(ipPre, LogicValue::One);
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(q) == LogicValue::One);
+
+    sim.setInput(ipClr, LogicValue::One); // PRE y CLR activos a la vez: combinacion invalida clasica
+    REQUIRE(sim.runUntilStable());
+    CHECK(sim.getNetValue(q) == LogicValue::Error);
 }
 
 TEST_CASE("TriStateBuffer passes D through only while EN is a clean One", "[simulator][tristate]") {

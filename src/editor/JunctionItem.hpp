@@ -25,10 +25,14 @@ class WireItem;
 // el arrastre). Para redibujar la ruta de un cable sin mover ningun
 // extremo real, ver la edicion de waypoints en WireItem.
 //
-// Solo dibuja el punto (dot) cuando tiene grado >=2 (union electrica real);
-// un junction en grado 1 (una punta de cable "al aire" tras borrar una de
-// sus derivaciones) sigue existiendo, pero no pinta nada, para no leerse
-// como una conexion que no existe.
+// Siempre dibuja un punto, agarrable igual que un ComponentItem -- un
+// junction en grado 1 (una punta de cable "al aire": recien soltada en el
+// vacio al trazar un cable, o lo que sobrevive tras borrar 2 de sus 3
+// derivaciones en el mismo gesto) se dibuja hueco/tenue en vez de relleno de
+// color logico, para que se lea como "hay algo agarrable aca" sin
+// confundirse con una union electrica real de grado >=2 (antes no se
+// dibujaba nada en absoluto ahi, dejando ese extremo invisible e
+// inencontrable para arrastrarlo -- el defecto reportado).
 class JunctionItem : public QGraphicsEllipseItem {
 public:
     JunctionItem(CircuitDocument* document, uint32_t junctionId, QGraphicsItem* parent = nullptr);
@@ -39,6 +43,7 @@ public:
 
     void addAttachedWire(WireItem* wire);
     void removeAttachedWire(WireItem* wire);
+    [[nodiscard]] const std::vector<WireItem*>& attachedWires() const noexcept { return attachedWires_; }
 
     static constexpr qreal kRadius = 3.0;
 

@@ -6,12 +6,18 @@
 
 namespace digitalforge::formats {
 
-// Una entrada del manifiesto: un documento (.dfc) del proyecto, referenciado
-// por una ruta relativa al directorio del propio archivo .dfproj (al estilo
-// .sln + .csproj de Visual Studio) - nunca embebido en el manifiesto.
+// Una entrada del manifiesto: un documento (.dfc o .dfk) del proyecto,
+// referenciado por una ruta relativa al directorio del propio archivo
+// .dfproj (al estilo .sln + .csproj de Visual Studio) - nunca embebido en
+// el manifiesto.
 struct ProjectManifestEntry {
     QString name;
     QString relativePath;
+    // "circuit" (.dfc, editor::CircuitDocument) o "karnaugh" (.dfk,
+    // editor::KarnaughDocument). Ausente en el JSON == "circuit" (ver
+    // parseProjectManifest) - todo proyecto guardado antes de que
+    // existiera esta distincion sigue cargando exactamente igual.
+    QString kind = QStringLiteral("circuit");
 };
 
 // Datos planos del manifiesto de un proyecto multi-documento (.dfproj,

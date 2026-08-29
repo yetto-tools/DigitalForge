@@ -17,6 +17,7 @@ nlohmann::json serializeProjectManifest(const ProjectManifest& manifest) {
         documents.push_back({
             {"name", entry.name.toStdString()},
             {"path", entry.relativePath.toStdString()},
+            {"kind", entry.kind.toStdString()},
         });
     }
     json["documents"] = std::move(documents);
@@ -36,6 +37,7 @@ ProjectManifest parseProjectManifest(const nlohmann::json& json) {
         ProjectManifestEntry entry;
         entry.name = QString::fromStdString(docJson.at("name").get<std::string>());
         entry.relativePath = QString::fromStdString(docJson.at("path").get<std::string>());
+        entry.kind = QString::fromStdString(docJson.value("kind", std::string("circuit")));
         manifest.documents.push_back(std::move(entry));
     }
     if (manifest.documents.empty()) {

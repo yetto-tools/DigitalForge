@@ -24,7 +24,14 @@ add_executable(DigitalForge WIN32
     ${CMAKE_SOURCE_DIR}/src/editor/PlacementTool.cpp
     ${CMAKE_SOURCE_DIR}/src/editor/CircuitScene.cpp
     ${CMAKE_SOURCE_DIR}/src/editor/CircuitView.cpp
+    ${CMAKE_SOURCE_DIR}/src/editor/CircuitAutoLayout.cpp
+    ${CMAKE_SOURCE_DIR}/src/editor/CircuitLayoutGraph.cpp
     ${CMAKE_SOURCE_DIR}/src/editor/TruthTable.cpp
+    ${CMAKE_SOURCE_DIR}/src/editor/KarnaughMap.cpp
+    ${CMAKE_SOURCE_DIR}/src/editor/KarnaughDocument.cpp
+    ${CMAKE_SOURCE_DIR}/src/editor/TruthTableDocument.cpp
+    ${CMAKE_SOURCE_DIR}/src/editor/FlipFlopExcitation.cpp
+    ${CMAKE_SOURCE_DIR}/src/editor/ExcitationTableDocument.cpp
     ${CMAKE_SOURCE_DIR}/src/editor/WaveformRecorder.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/AutoHideStrip.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/ComponentPalette.cpp
@@ -32,6 +39,9 @@ add_executable(DigitalForge WIN32
     ${CMAKE_SOURCE_DIR}/src/ui/PropertyInspector.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/SimulationToolbar.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/TruthTablePanel.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/KarnaughMapView.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/TruthTableView.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/ExcitationTableView.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/WaveformPanel.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/IconFactory.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/PreferencesDialog.cpp
@@ -42,6 +52,10 @@ add_executable(DigitalForge WIN32
     ${CMAKE_SOURCE_DIR}/src/formats/ProjectSerializer.cpp
     ${CMAKE_SOURCE_DIR}/src/formats/LockFile.cpp
     ${CMAKE_SOURCE_DIR}/src/formats/LogisimImporter.cpp
+    ${CMAKE_SOURCE_DIR}/src/formats/KarnaughSynthesizer.cpp
+    ${CMAKE_SOURCE_DIR}/src/formats/KarnaughSerializer.cpp
+    ${CMAKE_SOURCE_DIR}/src/formats/TruthTableSerializer.cpp
+    ${CMAKE_SOURCE_DIR}/src/formats/ExcitationTableSerializer.cpp
 )
 
 target_link_libraries(DigitalForge PRIVATE digitalforge_components Qt6::Widgets Qt6::Network)
