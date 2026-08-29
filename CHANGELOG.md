@@ -4,6 +4,38 @@ Todas las versiones publicables de DigitalForge se listan aquí. El formato
 sigue, a grandes rasgos, [Keep a Changelog](https://keepachangelog.com/es/),
 y el versionado es [semántico](https://semver.org/lang/es/).
 
+## v0.1.5 — pre-alpha
+
+### Editor gráfico (Qt6)
+- **Propiedades como diálogo modal**: el panel de Propiedades deja de ser un
+  dock anclado y pasa a abrirse a demanda (doble clic sobre un componente, o
+  "Propiedades" del menú contextual) en un diálogo modal.
+- Atajo `Ctrl+R` para rotar el componente seleccionado (el atajo de
+  "Reiniciar simulación" pasa a `Ctrl+Shift+R` para no chocar).
+- **Fix**: las derivaciones sobre un cable existente ya no quedan
+  desalineadas de la grilla de fondo.
+- **Fix**: un punto de unión recién soltado en el vacío (grado 1) ya se
+  dibuja y puede volver a agarrarse/arrastrarse — antes quedaba invisible e
+  inencontrable.
+- **Resaltado de nodo completo**: seleccionar un cable o un punto de unión
+  ilumina automáticamente todo el nodo eléctrico (todos los cables/uniones
+  que comparten esa misma señal).
+- **Panel "Errores y advertencias" (DRC)**: lista pines obligatorios sin
+  conectar, conflictos de manejadores (incluye cortocircuitos entre fuentes
+  fijas) y oscilación detectada; un clic en cada fila selecciona los
+  pines/uniones implicados en el lienzo.
+
+### Tablas de excitación de flip-flops
+- Nuevo tipo de documento "Tabla de excitación": registra estado actual y
+  siguiente por bit, con el tipo de flip-flop (SR, JK, T, D) seleccionable
+  por bit. Las columnas de estado actual y estado siguiente son editables
+  por igual (clic para ciclar 0/1/X).
+- "Generar mapas": produce los mapas de Karnaugh de excitación
+  correspondientes al tipo de flip-flop elegido.
+- "Generar circuito con flip-flops": sintetiza el circuito secuencial
+  completo a partir de la tabla de excitación, con los flip-flops ya
+  colocados y cableados (D, T, JK).
+
 ## v0.1.4 — pre-alpha
 
 ### Correcciones

@@ -59,7 +59,7 @@ class UpdateChecker;
 
 // Compartido entre MainWindow::onAbout() y main.cpp (splash de inicio) -
 // unico lugar donde cambiar la version mostrada al usuario.
-inline constexpr const char* kAppVersion = "0.1.4 PRE-ALPHA";
+inline constexpr const char* kAppVersion = "0.1.5 PRE-ALPHA";
 
 // Ventana principal: menus (Archivo/Editar/Simulacion/Ver/Bibliotecas),
 // barra de herramientas, paleta de componentes a la izquierda, lienzo del
