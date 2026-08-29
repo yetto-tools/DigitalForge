@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 
 #include <algorithm>
@@ -383,6 +384,7 @@ void CircuitDocument::rebuildSimulation() {
     circuit_ = std::make_unique<core::Circuit>();
     pinToNet_.clear();
     junctionToNet_.clear();
+    netToEndpoints_.clear();
 
     // Union-find sobre WireEndpoint (pines de componente + puntos de union
     // libres): un cable entre cualquier combinacion de ambos los agrupa en
@@ -451,12 +453,15 @@ void CircuitDocument::rebuildSimulation() {
             const WireEndpoint ref{PinRef{id, p}};
             const core::NetId net = netForRoot(dsuFind(parent, ref));
             pinToNet_[PinRef{id, p}] = net;
+            netToEndpoints_[net].push_back(ref);
             instance->bindPin(p, net);
         }
     }
     for (const auto& [junctionId, position] : junctions_) {
         const WireEndpoint ref = WireEndpoint::junction(junctionId);
-        junctionToNet_[junctionId] = netForRoot(dsuFind(parent, ref));
+        const core::NetId net = netForRoot(dsuFind(parent, ref));
+        junctionToNet_[junctionId] = net;
+        netToEndpoints_[net].push_back(ref);
     }
 
     for (const auto& [id, instance] : components_) {
@@ -676,8 +681,103 @@ core::LogicValue CircuitDocument::endpointValue(WireEndpoint endpoint) const {
     return simulator_->getNetValue(it->second);
 }
 
+std::vector<WireEndpoint> CircuitDocument::endpointsOnSameNet(WireEndpoint endpoint) const {
+    if (endpoint.isJunction) {
+        const auto it = junctionToNet_.find(endpoint.id);
+        if (it == junctionToNet_.end()) {
+            return {};
+        }
+        return netToEndpoints_.at(it->second);
+    }
+    const auto it = pinToNet_.find(PinRef{endpoint.id, endpoint.pinIndex});
+    if (it == pinToNet_.end()) {
+        return {};
+    }
+    return netToEndpoints_.at(it->second);
+}
+
 bool CircuitDocument::oscillationDetected() const noexcept {
     return simulator_ ? simulator_->stats().oscillationDetected : false;
+}
+
+namespace {
+// Mismo criterio que MainWindow::describeWireEndpoint() (etiqueta si tiene,
+// si no el typeId; "(pin N)" si el pin tiene nombre) -- duplicado aca porque
+// ese vive en app/, que CircuitDocument (editor/) no puede depender de.
+QString describeEndpointForDiagnostic(const CircuitDocument& document, const WireEndpoint& endpoint) {
+    if (endpoint.isJunction) {
+        return QStringLiteral("Punto de union #%1").arg(endpoint.id);
+    }
+    const components::ComponentInstance* instance = document.component(endpoint.id);
+    if (instance == nullptr) {
+        return QStringLiteral("(componente eliminado)");
+    }
+    const std::string& label = std::get<std::string>(instance->property("label"));
+    const QString name = label.empty() ? QString::fromStdString(instance->typeId()) : QString::fromStdString(label);
+    QString pinName;
+    if (endpoint.pinIndex < instance->pins().size()) {
+        pinName = QString::fromStdString(instance->pins()[endpoint.pinIndex].name).trimmed();
+    }
+    return pinName.isEmpty() ? name : QStringLiteral("%1 (pin %2)").arg(name, pinName);
+}
+} // namespace
+
+std::vector<CircuitDocument::CircuitDiagnostic> CircuitDocument::runDiagnostics() const {
+    std::vector<CircuitDiagnostic> result;
+    if (!simulator_) {
+        return result;
+    }
+
+    // Pines obligatorios (Input/Bidirectional) que nunca quedaron cableados a
+    // nada mas -- endpointsOnSameNet() siempre incluye al propio pin, asi que
+    // "solo" (tamano <= 1) significa "sin ninguna otra conexion".
+    for (const auto& [id, instance] : components_) {
+        for (uint16_t p = 0; p < instance->pins().size(); ++p) {
+            const core::PinDirection direction = instance->pins()[p].direction;
+            if (direction != core::PinDirection::Input && direction != core::PinDirection::Bidirectional) {
+                continue;
+            }
+            const WireEndpoint endpoint{PinRef{id, p}};
+            if (endpointsOnSameNet(endpoint).size() <= 1) {
+                result.push_back(CircuitDiagnostic{
+                    CircuitDiagnostic::Severity::Warning,
+                    QStringLiteral("Pin sin conectar: %1").arg(describeEndpointForDiagnostic(*this, endpoint)),
+                    {endpoint},
+                });
+            }
+        }
+    }
+
+    // Conflicto de manejadores: dos o mas fuentes fijas en desacuerdo sobre
+    // la misma red (incluye el caso VCC/GND unidos, al ser ambas fuentes
+    // fijas en conflicto entre si).
+    for (const auto& [net, endpoints] : netToEndpoints_) {
+        if (simulator_->getNetValue(net) != core::LogicValue::Error) {
+            continue;
+        }
+        QStringList names;
+        for (const WireEndpoint& endpoint : endpoints) {
+            names << describeEndpointForDiagnostic(*this, endpoint);
+        }
+        result.push_back(CircuitDiagnostic{
+            CircuitDiagnostic::Severity::Error,
+            QStringLiteral("Conflicto de manejadores entre: %1").arg(names.join(QStringLiteral(", "))),
+            endpoints,
+        });
+    }
+
+    // Oscilacion: un unico Error global -- el simulador no expone hoy en que
+    // red exacta se detecto, y no vale la pena ampliar su API solo para esto
+    // (mismo criterio que ya usa la barra de estado).
+    if (oscillationDetected()) {
+        result.push_back(CircuitDiagnostic{
+            CircuitDiagnostic::Severity::Error,
+            QStringLiteral("Oscilacion detectada en el circuito"),
+            {},
+        });
+    }
+
+    return result;
 }
 
 std::vector<CircuitDocument::BoundaryEntry> CircuitDocument::boundaryEntries() const {

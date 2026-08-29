@@ -106,6 +106,7 @@ CircuitScene::CircuitScene(CircuitDocument* document, QUndoStack* undoStack, QOb
     connect(QApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
             [this](Qt::ColorScheme) { update(); });
 
+    connect(this, &QGraphicsScene::selectionChanged, this, &CircuitScene::updateNetHighlight);
 }
 
 CircuitScene::~CircuitScene() = default;
@@ -189,6 +190,19 @@ void CircuitScene::selectComponent(uint32_t componentId) {
     }
 }
 
+void CircuitScene::selectEndpoints(const std::vector<WireEndpoint>& endpoints) {
+    clearSelection();
+    for (const WireEndpoint& endpoint : endpoints) {
+        if (endpoint.isJunction) {
+            if (JunctionItem* item = junctionItem(endpoint.id)) {
+                item->setSelected(true);
+            }
+        } else if (ComponentItem* item = componentItem(endpoint.id)) {
+            item->setSelected(true);
+        }
+    }
+}
+
 QPointF CircuitScene::endpointScenePosition(const WireEndpoint& endpoint) const {
     if (endpoint.isJunction) {
         return document_->junctionPosition(endpoint.id);
@@ -230,6 +244,61 @@ std::vector<QPointF> CircuitScene::mergedWaypointsAcrossJunction(uint32_t juncti
         return {};
     }
     return std::vector<QPointF>(simplified.begin() + 1, simplified.end() - 1);
+}
+
+void CircuitScene::updateNetHighlight() {
+    for (const uint32_t id : highlightedWireIds_) {
+        if (WireItem* item = wireItem(id)) {
+            item->setHighlighted(false);
+        }
+    }
+    for (const uint32_t id : highlightedJunctionIds_) {
+        if (JunctionItem* item = junctionItem(id)) {
+            item->setHighlighted(false);
+        }
+    }
+    highlightedWireIds_.clear();
+    highlightedJunctionIds_.clear();
+
+    const QList<QGraphicsItem*> selected = selectedItems();
+    if (selected.size() != 1) {
+        return; // 0 o 2+ items: sin semilla inequivoca de que nodo resaltar
+    }
+
+    std::optional<WireEndpoint> seed;
+    if (auto* wire = dynamic_cast<WireItem*>(selected.front())) {
+        if (const WireConnection* connection = document_->wire(wire->wireId())) {
+            seed = connection->a;
+        }
+    } else if (auto* junction = dynamic_cast<JunctionItem*>(selected.front())) {
+        seed = WireEndpoint::junction(junction->junctionId());
+    }
+    if (!seed.has_value()) {
+        return; // se selecciono un componente (u otra cosa): sin nodo que resaltar
+    }
+
+    const std::vector<WireEndpoint> netEndpoints = document_->endpointsOnSameNet(*seed);
+    if (netEndpoints.size() <= 1) {
+        return; // nodo sin nadie mas del otro lado: nada que resaltar
+    }
+    const std::set<WireEndpoint> netSet(netEndpoints.begin(), netEndpoints.end());
+
+    for (const auto& [wireId, item] : wireItems_) {
+        const WireConnection* connection = document_->wire(wireId);
+        if (connection != nullptr && (netSet.contains(connection->a) || netSet.contains(connection->b))) {
+            item->setHighlighted(true);
+            highlightedWireIds_.push_back(wireId);
+        }
+    }
+    for (const WireEndpoint& endpoint : netEndpoints) {
+        if (!endpoint.isJunction) {
+            continue;
+        }
+        if (JunctionItem* item = junctionItem(endpoint.id)) {
+            item->setHighlighted(true);
+            highlightedJunctionIds_.push_back(endpoint.id);
+        }
+    }
 }
 
 void CircuitScene::drawBackground(QPainter* painter, const QRectF& rect) {

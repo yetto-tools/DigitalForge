@@ -61,6 +61,12 @@ public:
     // limpia el offset.
     void setLiveWaypointOffset(std::optional<QPointF> offset);
 
+    // Marca/desmarca este cable como parte del nodo electrico resaltado --
+    // ver CircuitScene::updateNetHighlight(). Puramente visual (un halo
+    // adicional en paint(), ver ahi); no cambia nada del modelo.
+    void setHighlighted(bool highlighted);
+    [[nodiscard]] bool isHighlighted() const noexcept { return highlighted_; }
+
     // Recalcula el trazado a partir de las posiciones de escena actuales de
     // los extremos (y, si hay un arrastre en curso, de la polilinea en
     // edicion). Se llama cada vez que alguno de los ComponentItem/JunctionItem
@@ -142,6 +148,7 @@ private:
     std::vector<QPointF> dragPolyline_;
 
     bool hovered_ = false;
+    bool highlighted_ = false;
 
     // Estado de un arrastre de extremo en curso (reconexion): que extremo se
     // esta moviendo y a que punto de escena sigue mientras dura el gesto.

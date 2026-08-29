@@ -297,8 +297,35 @@ public:
     // de union) -- usado por WireItem/JunctionItem para colorear cables y
     // puntos de union sin importar de que tipo es cada extremo.
     [[nodiscard]] core::LogicValue endpointValue(WireEndpoint endpoint) const;
+    // Todos los extremos (pines de componente y/o puntos de union) que
+    // comparten la misma net que `endpoint`, incluido el propio `endpoint`
+    // -- usado para resaltar un nodo electrico completo (ver
+    // CircuitScene::updateNetHighlight()) y para el chequeo de pines sin
+    // conectar de runDiagnostics(). Vacio si `endpoint` no esta enlazado a
+    // ninguna net (simulacion no construida, o id desconocido).
+    [[nodiscard]] std::vector<WireEndpoint> endpointsOnSameNet(WireEndpoint endpoint) const;
 
     [[nodiscard]] bool oscillationDetected() const noexcept;
+
+    // Un problema encontrado por runDiagnostics(): `relatedEndpoints` deja
+    // que quien lo muestra (ver ui::DiagnosticsPanel) pueda seleccionar/
+    // resaltar exactamente los pines/uniones involucrados al hacer click.
+    struct CircuitDiagnostic {
+        enum class Severity : uint8_t { Warning, Error };
+        Severity severity = Severity::Warning;
+        QString message;
+        std::vector<WireEndpoint> relatedEndpoints;
+    };
+    // Recorre el circuito actual y devuelve, en este orden: un Warning por
+    // cada pin Input/Bidirectional sin cablear a nada mas (ver
+    // endpointsOnSameNet()), un Error por cada net cuyo valor resuelto es
+    // core::LogicValue::Error (dos o mas manejadores en conflicto -- un
+    // cortocircuito entre dos fuentes fijas, p. ej. VCC y GND unidas, cae
+    // aca igual que cualquier otro conflicto de manejadores), y un Error
+    // final si oscillationDetected() es true. Se recalcula cada vez que se
+    // llama (tan barato como recorrer componentIds() una vez); no se
+    // cachea. Vacio si la simulacion todavia no se construyo.
+    [[nodiscard]] std::vector<CircuitDiagnostic> runDiagnostics() const;
 
     // --- components::ExternalDocumentView --- (ver ese header para el
     // contrato completo; usado cuando este documento es el *destino* de un
@@ -405,6 +432,9 @@ private:
     std::unique_ptr<core::Simulator> simulator_;
     std::map<PinRef, core::NetId> pinToNet_;
     std::map<uint32_t, core::NetId> junctionToNet_;
+    // Mapa inverso de los dos de arriba, poblado en el mismo tramo de
+    // rebuildSimulation() -- ver endpointsOnSameNet().
+    std::map<core::NetId, std::vector<WireEndpoint>> netToEndpoints_;
     // Comienza detenida: el usuario debe pulsar Ejecutar explicitamente para
     // iniciar la propagacion en vivo, en consonancia con el requisito de que
     // la simulacion nunca arranque de forma implicita.

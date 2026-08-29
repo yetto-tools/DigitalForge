@@ -40,6 +40,7 @@ struct WireEndpoint;
 namespace digitalforge::ui {
 class AutoHideStrip;
 class ComponentPalette;
+class DiagnosticsPanel;
 class ExcitationTableView;
 class KarnaughMapView;
 class MiniMapView;
@@ -336,10 +337,12 @@ private:
     ui::SimulationToolbar* simulationToolbar_ = nullptr;
     ui::TruthTablePanel* truthTablePanel_ = nullptr;
     ui::WaveformPanel* waveformPanel_ = nullptr;
+    ui::DiagnosticsPanel* diagnosticsPanel_ = nullptr;
     // Guardados para poder traer al frente estos paneles desde codigo (ver
     // setupDocks()/setupMenusAndToolbars()) - comparten una misma pestana.
     QDockWidget* truthTableDock_ = nullptr;
     QDockWidget* waveformDock_ = nullptr;
+    QDockWidget* diagnosticsDock_ = nullptr;
 
     // Auto-hide estilo Visual Studio (ver setupAutoHideStrips()/
     // makeAutoHideable()/setDockAutoHidden()). leftAutoHideStrip_/

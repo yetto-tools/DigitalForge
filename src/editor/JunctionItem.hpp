@@ -45,6 +45,10 @@ public:
     void removeAttachedWire(WireItem* wire);
     [[nodiscard]] const std::vector<WireItem*>& attachedWires() const noexcept { return attachedWires_; }
 
+    // Ver WireItem::setHighlighted() -- mismo criterio, mismo disparador
+    // (CircuitScene::updateNetHighlight()).
+    void setHighlighted(bool highlighted);
+
     static constexpr qreal kRadius = 3.0;
 
 protected:
@@ -57,6 +61,7 @@ private:
     uint32_t junctionId_;
     std::vector<WireItem*> attachedWires_;
     bool hovered_ = false;
+    bool highlighted_ = false;
 };
 
 } // namespace digitalforge::editor

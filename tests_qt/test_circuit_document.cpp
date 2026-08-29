@@ -10,6 +10,7 @@
 #include <QUndoStack>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <utility>
@@ -501,6 +502,70 @@ TEST_CASE("Turning on asyncPresetClear appends PRE/CLR at the end without distur
     CHECK(doc.component(dff)->pins()[2].name == "Q ");
     CHECK(doc.component(dff)->pins()[4].name == "PRE");
     CHECK(doc.component(dff)->pins()[5].name == "CLR");
+}
+
+TEST_CASE("endpointsOnSameNet returns every endpoint sharing a net, from either a pin or the junction",
+          "[circuitdocument][diagnostics]") {
+    CircuitDocument doc;
+    const uint32_t in0 = doc.addComponent("wiring.input", {{"initialValue", PropertyValue{std::string("1")}}});
+    const uint32_t led = doc.addComponent("io.led");
+    const uint32_t junctionId = doc.reserveJunctionId();
+    doc.addJunctionWithId(junctionId, QPointF(50, 0));
+    doc.addWire(PinRef{in0, 0}, WireEndpoint::junction(junctionId));
+    doc.addWire(WireEndpoint::junction(junctionId), PinRef{led, 0});
+
+    const std::vector<WireEndpoint> fromJunction = doc.endpointsOnSameNet(WireEndpoint::junction(junctionId));
+    const std::vector<WireEndpoint> fromPin = doc.endpointsOnSameNet(WireEndpoint(PinRef{in0, 0}));
+    CHECK(fromJunction.size() == 3);
+    CHECK(fromPin.size() == 3);
+    for (const std::vector<WireEndpoint>& endpoints : {fromJunction, fromPin}) {
+        CHECK(std::find(endpoints.begin(), endpoints.end(), WireEndpoint(PinRef{in0, 0})) != endpoints.end());
+        CHECK(std::find(endpoints.begin(), endpoints.end(), WireEndpoint(PinRef{led, 0})) != endpoints.end());
+        CHECK(std::find(endpoints.begin(), endpoints.end(), WireEndpoint::junction(junctionId)) != endpoints.end());
+    }
+
+    // Un extremo nunca sembrado en el union-find (id inexistente) no tiene
+    // net -- devuelve vacio en vez de lanzar.
+    CHECK(doc.endpointsOnSameNet(WireEndpoint::junction(junctionId + 1000)).empty());
+}
+
+TEST_CASE("runDiagnostics is empty for a fully-wired circuit", "[circuitdocument][diagnostics]") {
+    CircuitDocument doc;
+    const uint32_t in0 = doc.addComponent("wiring.input", {{"initialValue", PropertyValue{std::string("1")}}});
+    const uint32_t led = doc.addComponent("io.led");
+    doc.addWire(PinRef{in0, 0}, PinRef{led, 0});
+
+    CHECK(doc.runDiagnostics().empty());
+}
+
+TEST_CASE("runDiagnostics reports a warning for an unconnected mandatory pin", "[circuitdocument][diagnostics]") {
+    CircuitDocument doc;
+    const uint32_t led = doc.addComponent("io.led"); // pin "A" (Input) sin cablear a nada
+
+    const std::vector<CircuitDocument::CircuitDiagnostic> diagnostics = doc.runDiagnostics();
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].severity == CircuitDocument::CircuitDiagnostic::Severity::Warning);
+    CHECK(diagnostics[0].message.contains(QStringLiteral("sin conectar")));
+    REQUIRE(diagnostics[0].relatedEndpoints.size() == 1);
+    CHECK(diagnostics[0].relatedEndpoints[0] == WireEndpoint(PinRef{led, 0}));
+}
+
+TEST_CASE("runDiagnostics reports a driver-conflict error when two fixed sources share a net",
+          "[circuitdocument][diagnostics]") {
+    CircuitDocument doc;
+    const uint32_t zero = doc.addComponent("wiring.constant", {{"value", PropertyValue{std::string("0")}}});
+    const uint32_t one = doc.addComponent("wiring.constant", {{"value", PropertyValue{std::string("1")}}});
+    doc.addWire(PinRef{zero, 0}, PinRef{one, 0});
+
+    const std::vector<CircuitDocument::CircuitDiagnostic> diagnostics = doc.runDiagnostics();
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].severity == CircuitDocument::CircuitDiagnostic::Severity::Error);
+    CHECK(diagnostics[0].message.contains(QStringLiteral("Conflicto de manejadores")));
+    REQUIRE(diagnostics[0].relatedEndpoints.size() == 2);
+    CHECK(std::find(diagnostics[0].relatedEndpoints.begin(), diagnostics[0].relatedEndpoints.end(),
+                     WireEndpoint(PinRef{zero, 0})) != diagnostics[0].relatedEndpoints.end());
+    CHECK(std::find(diagnostics[0].relatedEndpoints.begin(), diagnostics[0].relatedEndpoints.end(),
+                     WireEndpoint(PinRef{one, 0})) != diagnostics[0].relatedEndpoints.end());
 }
 
 TEST_CASE("CircuitDocument loads JSON components from DIGITALFORGE_COMPONENTS_DIR",

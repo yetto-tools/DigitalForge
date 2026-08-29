@@ -69,6 +69,13 @@ public:
     // ya trazado (en vez de sobre un pin o un punto de union existente).
     [[nodiscard]] WireItem* wireItemAt(QPointF scenePos) const;
     void selectComponent(uint32_t componentId);
+    // Selecciona el ComponentItem (por su pin) o JunctionItem que corresponda
+    // a cada WireEndpoint, reemplazando la seleccion actual -- usado por
+    // MainWindow al activar una fila del panel de errores/advertencias
+    // (ver ui::DiagnosticsPanel::diagnosticActivated()). Al quedar
+    // seleccionado un unico cable/union, esto ya dispara el resaltado de
+    // nodo completo (ver updateNetHighlight()) sin ningun paso extra.
+    void selectEndpoints(const std::vector<WireEndpoint>& endpoints);
 
     [[nodiscard]] bool snapToGridEnabled() const noexcept { return snapToGrid_; }
     void setSnapToGridEnabled(bool enabled) { snapToGrid_ = enabled; }
@@ -175,6 +182,13 @@ private:
     // borro, asi que las dos mitades vuelven a ser un tramo recto).
     [[nodiscard]] std::vector<QPointF> mergedWaypointsAcrossJunction(uint32_t junctionId, const WireConnection& w1,
                                                                       const WireConnection& w2) const;
+    // Resalta el nodo electrico completo cuando la seleccion actual es
+    // exactamente UN WireItem o UN JunctionItem (via
+    // CircuitDocument::endpointsOnSameNet()) -- conectado a
+    // QGraphicsScene::selectionChanged en el constructor. Cualquier otra
+    // seleccion (vacia, un componente, o 2+ items) limpia el resaltado
+    // anterior.
+    void updateNetHighlight();
 
     CircuitDocument* document_;
     QUndoStack* undoStack_;
@@ -200,6 +214,11 @@ private:
     std::map<uint32_t, ComponentItem*> componentItems_;
     std::map<uint32_t, WireItem*> wireItems_;
     std::map<uint32_t, JunctionItem*> junctionItems_;
+    // Items actualmente resaltados por updateNetHighlight() -- se limpian
+    // ahi mismo antes de recalcular, para no depender de recorrer TODO
+    // wireItems_/junctionItems_ en cada cambio de seleccion.
+    std::vector<uint32_t> highlightedWireIds_;
+    std::vector<uint32_t> highlightedJunctionIds_;
 
     std::unique_ptr<SelectionTool> selectionTool_;
     std::unique_ptr<WireTool> wireTool_;

@@ -33,6 +33,14 @@ void JunctionItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* opti
     // agarrable/arrastrable, sin cambiar su semantica de color.
     const QRectF r = hovered_ ? rect().adjusted(-1.5, -1.5, 1.5, 1.5) : rect();
 
+    // Halo del nodo resaltado -- ver WireItem::paint() para el mismo criterio
+    // (debajo del punto normal, no reemplaza su color/estilo).
+    if (highlighted_) {
+        painter->setPen(QPen(QColor(0, 200, 255, 130), 4.0));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawEllipse(r.adjusted(-2.5, -2.5, 2.5, 2.5));
+    }
+
     if (document_->wiresAttachedToJunction(junctionId_).size() < 2) {
         // Punta de cable "al aire": hueca y en gris (nunca el color de
         // ningun valor logico real, para no sugerir una conexion que no
@@ -56,6 +64,14 @@ void JunctionItem::hoverEnterEvent(QGraphicsSceneHoverEvent*) {
 
 void JunctionItem::hoverLeaveEvent(QGraphicsSceneHoverEvent*) {
     hovered_ = false;
+    update();
+}
+
+void JunctionItem::setHighlighted(bool highlighted) {
+    if (highlighted_ == highlighted) {
+        return;
+    }
+    highlighted_ = highlighted;
     update();
 }
 

@@ -43,6 +43,7 @@ add_executable(DigitalForge WIN32
     ${CMAKE_SOURCE_DIR}/src/ui/TruthTableView.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/ExcitationTableView.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/WaveformPanel.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/DiagnosticsPanel.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/IconFactory.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/PreferencesDialog.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/MiniMapView.cpp

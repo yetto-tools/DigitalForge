@@ -101,6 +101,14 @@ void WireItem::setLiveWaypointOffset(std::optional<QPointF> offset) {
     updateGeometry();
 }
 
+void WireItem::setHighlighted(bool highlighted) {
+    if (highlighted_ == highlighted) {
+        return;
+    }
+    highlighted_ = highlighted;
+    update();
+}
+
 std::vector<QPointF> WireItem::storedWaypoints() const {
     const WireConnection* w = document_->wire(wireId_);
     return w != nullptr ? w->waypoints : std::vector<QPointF>{};
@@ -221,6 +229,20 @@ void WireItem::updateGeometry() {
 void WireItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget*) {
     const core::LogicValue value = document_->endpointValue(a_);
     const bool selected = (option->state & QStyle::State_Selected) != 0;
+
+    // Halo del nodo resaltado (ver CircuitScene::updateNetHighlight()):
+    // debajo del trazado normal, sin tocar su color por valor logico ni su
+    // estilo de "seleccionado" -- son dos senales visuales distintas y
+    // complementarias (un cable puede estar resaltado sin estar seleccionado,
+    // p. ej. el resto del mismo nodo cuando se selecciono otro tramo).
+    if (highlighted_) {
+        QPen halo(QColor(0, 200, 255, 130));
+        halo.setWidth(6);
+        halo.setCapStyle(Qt::RoundCap);
+        halo.setJoinStyle(Qt::RoundJoin);
+        painter->setPen(halo);
+        painter->drawPath(path());
+    }
 
     QPen pen(logicValueColor(value));
     pen.setWidth(selected ? 2 : (hovered_ ? 2 : 1));

@@ -57,6 +57,7 @@
 #include "formats/ProjectSerializer.hpp"
 #include "ui/AutoHideStrip.hpp"
 #include "ui/ComponentPalette.hpp"
+#include "ui/DiagnosticsPanel.hpp"
 #include "ui/ExcitationTableView.hpp"
 #include "ui/IconFactory.hpp"
 #include "ui/KarnaughMapView.hpp"
@@ -430,6 +431,15 @@ void MainWindow::setupDocks() {
     waveformDock_->setWidget(waveformPanel_);
     waveformDock_->setTitleBarWidget(new DockTitleBar(waveformDock_));
     tabifyDockWidget(truthTableDock_, waveformDock_);
+
+    diagnosticsPanel_ = new ui::DiagnosticsPanel(project_->activeDocument(), this);
+    connect(diagnosticsPanel_, &ui::DiagnosticsPanel::diagnosticActivated, this,
+            [this](const std::vector<editor::WireEndpoint>& endpoints) { activeScene()->selectEndpoints(endpoints); });
+    diagnosticsDock_ = new QDockWidget(tr("Errores y advertencias"), this);
+    diagnosticsDock_->setObjectName("diagnosticsDock");
+    diagnosticsDock_->setWidget(diagnosticsPanel_);
+    diagnosticsDock_->setTitleBarWidget(new DockTitleBar(diagnosticsDock_));
+    tabifyDockWidget(waveformDock_, diagnosticsDock_);
     // Visibles de entrada, igual que projectTreeDock/paletteDock del lado
     // izquierdo - el unico control de visibilidad es el pin de auto-hide de
     // cada uno (ver DockTitleBar/makeAutoHideable), sin ningun boton grupal
@@ -444,6 +454,7 @@ void MainWindow::setupDocks() {
     makeAutoHideable(paletteDock, Qt::LeftDockWidgetArea, projectTreeDock);
     makeAutoHideable(truthTableDock_, Qt::RightDockWidgetArea, waveformDock_);
     makeAutoHideable(waveformDock_, Qt::RightDockWidgetArea, truthTableDock_);
+    makeAutoHideable(diagnosticsDock_, Qt::RightDockWidgetArea, truthTableDock_);
 
     // El auto-hide guardado ya no se aplica aca sino en restoreWindowLayout(),
     // que corre una vez creadas tambien las barras de herramientas: hay que
@@ -1688,6 +1699,9 @@ void MainWindow::onActiveDocumentChanged(uint32_t id) {
     }
     if (waveformPanel_ != nullptr) {
         waveformPanel_->setDocument(project_->document(id));
+    }
+    if (diagnosticsPanel_ != nullptr) {
+        diagnosticsPanel_->setDocument(project_->document(id));
     }
     if (documentTabBar_ != nullptr) {
         // Puede no tener pestana todavia (se lo activo desde
